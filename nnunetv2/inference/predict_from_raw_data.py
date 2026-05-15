@@ -14,7 +14,7 @@ import torch
 from acvl_utils.cropping_and_padding.padding import pad_nd_image
 from batchgenerators.dataloading.multi_threaded_augmenter import MultiThreadedAugmenter
 from batchgenerators.utilities.file_and_folder_operations import load_json, join, isfile, maybe_mkdir_p, isdir, subdirs, \
-    save_json
+    save_json, subfiles
 from torch import nn
 from torch._dynamo import OptimizedModule
 from torch.nn.parallel import DistributedDataParallel
@@ -183,12 +183,20 @@ class nnUNetPredictor(object):
                                        part_id: int = 0,
                                        num_parts: int = 1,
                                        save_probabilities: bool = False):
+        file_ending = self.dataset_json['file_ending']
+        bundled_format = file_ending == '.medh5'
         if isinstance(list_of_lists_or_source_folder, str):
-            list_of_lists_or_source_folder = create_lists_from_splitted_dataset_folder(list_of_lists_or_source_folder,
-                                                                                       self.dataset_json['file_ending'])
+            if bundled_format:
+                # Bundled single-file-per-case formats do not use _XXXX channel suffixes
+                files = sorted(subfiles(list_of_lists_or_source_folder, suffix=file_ending, join=True))
+                list_of_lists_or_source_folder = [[f] for f in files]
+            else:
+                list_of_lists_or_source_folder = create_lists_from_splitted_dataset_folder(list_of_lists_or_source_folder,
+                                                                                           file_ending)
         print(f'There are {len(list_of_lists_or_source_folder)} cases in the source folder')
         list_of_lists_or_source_folder = list_of_lists_or_source_folder[part_id::num_parts]
-        caseids = [os.path.basename(i[0])[:-(len(self.dataset_json['file_ending']) + 5)] for i in
+        suffix_len = len(file_ending) if bundled_format else len(file_ending) + 5
+        caseids = [os.path.basename(i[0])[:-suffix_len] for i in
                    list_of_lists_or_source_folder]
         print(
             f'I am process {part_id} out of {num_parts} (max process ID is {num_parts - 1}, we start counting with 0!)')
