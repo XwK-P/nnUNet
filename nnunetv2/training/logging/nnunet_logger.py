@@ -14,6 +14,14 @@ try:
 except ImportError:
     wandb = None
 
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    SummaryWriter = None
+
+from datetime import datetime as _datetime
+import shutil as _shutil
+
 
 def get_cluster_job_id():
     job_id = None
@@ -301,3 +309,121 @@ class WandbLogger:
             value: Summary value to store.
         """
         self.run.summary[key] = value
+
+
+class TensorboardLogger:
+    """TensorBoard logger for nnU-Net training runs.
+
+    Default logdir: ``<output_folder>/tensorboard/``.
+    Override with env var ``nnUNet_tb_logdir`` for centralized aggregation;
+    when set, runs go to ``<value>/<basename(output_folder)>__<timestamp>/``.
+
+    Any exception during logging self-disables the logger for the rest of
+    the run; training is never interrupted by TB failures.
+    """
+
+    def __init__(self, output_folder, resume):
+        if SummaryWriter is None:
+            raise RuntimeError(
+                "tensorboard is not installed. Install it with `pip install tensorboard`."
+            )
+
+        self.output_folder = Path(output_folder)
+        self.resume = resume
+        self._disabled = False
+        self._hparams: dict = {}
+        self._summary_metrics: dict = {}
+
+        override = os.getenv("nnUNet_tb_logdir")
+        if override:
+            run_name = f"{self.output_folder.name}__{_datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            self.logdir = Path(override) / run_name
+        else:
+            self.logdir = self.output_folder / "tensorboard"
+
+        # If not resuming and a previous logdir exists, archive (don't delete) it.
+        if not self.resume and self.logdir.exists() and any(self.logdir.iterdir()):
+            archive_name = f"old_{_datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            archive_path = self.logdir / archive_name
+            archive_path.mkdir(parents=True, exist_ok=True)
+            for entry in list(self.logdir.iterdir()):
+                if entry.name.startswith("old_"):
+                    continue
+                _shutil.move(str(entry), str(archive_path / entry.name))
+
+        self.logdir.mkdir(parents=True, exist_ok=True)
+        self.writer = SummaryWriter(log_dir=str(self.logdir))
+
+    def update_config(self, config: dict):
+        if self._disabled:
+            return
+        try:
+            self._hparams.update(_flatten_for_hparams(config))
+        except Exception as e:
+            self._fail(f"update_config failed: {e}")
+
+    def log(self, key: str, value, step: int):
+        if self._disabled:
+            return
+        try:
+            self.writer.add_scalar(key, float(value), step)
+        except Exception as e:
+            self._fail(f"log scalar {key} failed: {e}")
+
+    def log_summary(self, key: str, value):
+        if self._disabled:
+            return
+        try:
+            numeric = float(value)
+            self.writer.add_scalar(f"summary/{key}", numeric)
+            self._summary_metrics[key] = numeric
+        except (TypeError, ValueError):
+            try:
+                self.writer.add_text(f"summary/{key}", str(value))
+            except Exception as e:
+                self._fail(f"log_summary text {key} failed: {e}")
+        except Exception as e:
+            self._fail(f"log_summary {key} failed: {e}")
+
+    def log_images(self, tag: str, image_chw, step: int):
+        if self._disabled:
+            return
+        try:
+            self.writer.add_image(tag, image_chw, step, dataformats="CHW")
+        except Exception as e:
+            self._fail(f"log_images {tag} failed: {e}")
+
+    def close(self):
+        if self._disabled:
+            try:
+                self.writer.close()
+            except Exception:
+                pass
+            return
+        try:
+            if self._hparams and self._summary_metrics:
+                self.writer.add_hparams(self._hparams, self._summary_metrics)
+            self.writer.flush()
+            self.writer.close()
+        except Exception as e:
+            self._fail(f"close failed: {e}")
+
+    def _fail(self, message: str):
+        print(f"[TensorboardLogger] {message}; disabling for rest of run")
+        self._disabled = True
+
+
+def _flatten_for_hparams(config: dict, prefix: str = "") -> dict:
+    """Flatten nested dicts to dotted keys; coerce values to TB-compatible scalars."""
+    flat: dict = {}
+    for k, v in config.items():
+        key = f"{prefix}.{k}" if prefix else str(k)
+        if isinstance(v, dict):
+            flat.update(_flatten_for_hparams(v, key))
+        elif isinstance(v, (int, float, str, bool)):
+            flat[key] = v
+        elif v is None:
+            flat[key] = "None"
+        else:
+            flat[key] = repr(v)
+    return flat
