@@ -1005,6 +1005,10 @@ class nnUNetTrainer(object):
             sys.stdout = old_stdout
 
         empty_cache(self.device)
+        try:
+            self.logger.close()
+        except Exception as e:
+            self.print_to_log_file(f"[MetaLogger] close raised, ignoring: {e}")
         self.print_to_log_file("Training done.")
 
     def on_train_epoch_start(self):
