@@ -44,6 +44,7 @@ from batchgenerators.utilities.file_and_folder_operations import (
 )
 
 from nnunetv2.configuration import default_num_processes
+from nnunetv2.imageio.medh5_reader_writer import RESERVED_INT_SEG_KEY
 from nnunetv2.imageio.reader_writer_registry import determine_reader_writer_from_dataset_json
 from nnunetv2.paths import nnUNet_raw
 from nnunetv2.utilities.dataset_name_id_conversion import (
@@ -114,12 +115,18 @@ def _convert_case(case_id: str,
     seg_dict = None
     if label_file is not None:
         seg_int_4d, seg_props = rw.read_seg(label_file)
-        seg_int = np.ascontiguousarray(seg_int_4d[0])
-        if seg_int.shape != images_arr.shape[1:]:
+        seg_int_float = seg_int_4d[0]
+        if seg_int_float.shape != images_arr.shape[1:]:
             raise RuntimeError(
-                f"Image/seg shape mismatch for case {case_id}: image={images_arr.shape[1:]}, seg={seg_int.shape}"
+                f"Image/seg shape mismatch for case {case_id}: image={images_arr.shape[1:]}, seg={seg_int_float.shape}"
             )
+        max_label = int(np.max(seg_int_float)) if seg_int_float.size else 0
+        int_dtype = np.uint8 if 0 <= max_label < 256 else np.int16
+        seg_int = np.ascontiguousarray(seg_int_float.astype(int_dtype, copy=False))
         seg_dict = _split_int_seg_to_masks(seg_int, labels) or None
+        # Store the original integer seg under the reserved key so round-tripping
+        # is bit-exact even for region-based labels (where boolean masks lose info).
+        images_dict[RESERVED_INT_SEG_KEY] = seg_int
 
     spacing = list(props['spacing']) if props.get('spacing') is not None else None
 
@@ -150,6 +157,10 @@ def _convert_case(case_id: str,
 
     extra = {
         'nnunet_labels': labels,
+        # Preserve the source dataset.json channel ordering — medh5 sorts
+        # image_names alphabetically internally, so without this Medh5IO.read_images
+        # would silently permute channels relative to the source dataset.json.
+        'nnunet_channel_order': list(ordered_channel_names),
         'source_file_ending': source_dataset_json.get('file_ending'),
         'source_case_id': case_id,
     }
@@ -161,7 +172,11 @@ def _convert_case(case_id: str,
         spacing=spacing,
         origin=origin,
         direction=direction,
-        coord_system='RAS' if direction is not None else None,
+        # Intentionally omit coord_system: SimpleITK reports origin/direction
+        # in LPS by convention, Nibabel in RAS — and we don't have enough info
+        # here to disambiguate. Origin/direction are preserved verbatim; downstream
+        # consumers should not assume a particular handedness without the tag.
+        coord_system=None,
         extra=extra,
         compression=compression,
     )

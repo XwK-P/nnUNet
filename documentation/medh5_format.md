@@ -38,12 +38,23 @@ $nnUNet_raw/
 
 Each `.medh5` contains:
 
-* `images = {channel_name: ndarray, ...}` — one entry per modality.
+* `images = {channel_name: ndarray, ...}` — one entry per modality, plus a
+  reserved `_nnunet_int_seg_v1` entry holding the original integer-labelled
+  segmentation. `Medh5IO.read_images` skips the reserved entry; `read_seg`
+  prefers it so the integer labels round-trip bit-exactly (this matters for
+  region-based `labels` mappings).
 * `seg = {class_name: bool_ndarray, ...}` — one entry per *foreground*
-  class (background is implicit).
-* `meta.spatial.spacing|origin|direction|coord_system` — spatial metadata.
-* `meta.extra["nnunet_labels"]` — the `labels` mapping from
-  `dataset.json`, so the file is self-describing for the reader.
+  class (background is implicit). Convenience encoding for non-nnU-Net
+  medh5 consumers.
+* `meta.spatial.spacing|origin|direction` — spatial metadata. `coord_system`
+  is intentionally left unset by the converter because SimpleITK uses LPS
+  and Nibabel uses RAS — origin/direction are preserved verbatim, but the
+  handedness tag is not asserted.
+* `meta.extra["nnunet_labels"]` — the `labels` mapping from `dataset.json`.
+* `meta.extra["nnunet_channel_order"]` — the source `channel_names`
+  ordering, so `read_images` can return channels in the order the source
+  `dataset.json` declared (medh5 sorts `image_names` alphabetically inside
+  the file).
 
 There is **no** `imagesTr/` or `labelsTr/` subfolder — nnU-Net's
 `dataset.json` schema already supports an explicit `dataset` key listing
@@ -104,16 +115,19 @@ CLI flags:
 
 ## Notes and limitations
 
-* Inference outputs are written to `.medh5` files that always contain
-  the integer-labelled prediction under `images["prediction"]`. When the
-  input file ships a `nnunet_labels` mapping (e.g. when produced by
-  `nnUNetv2_convert_to_medh5`), the prediction is additionally split
-  into per-class boolean masks under `seg/`.
+* Inference outputs are written to `.medh5` files that contain the
+  integer-labelled prediction under the reserved `_nnunet_int_seg_v1`
+  image entry. When the input file ships a `nnunet_labels` mapping (e.g.
+  when produced by `nnUNetv2_convert_to_medh5`), the prediction is
+  additionally split into per-class boolean masks under `seg/` for
+  consumers that expect medh5's native encoding.
 * `Medh5IO` lazy-imports `medh5`. If you forget the `[medh5]` extra you
   will see a clear `ImportError` directing you to `pip install nnunetv2[medh5]`.
 * medh5's bounding-box and image-level label fields are not used by
   nnU-Net; they pass through untouched in `extra` if you add them to your
   files manually.
-* Region-based labels (where a `labels` value is a list of ints) are
-  supported on read by mapping the boolean mask to the *first* int in
-  the list; on write we union all ints in the list to produce the mask.
+* Region-based labels (where a `labels` value is a list of ints) round-trip
+  bit-exactly through the reserved integer-seg entry. The per-class boolean
+  masks alone would collapse all ints in the list into one mask, so
+  consumers that ignore the reserved entry and only read `seg/` will see
+  the boolean union — not the per-voxel integer labels.

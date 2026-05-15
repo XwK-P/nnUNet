@@ -25,6 +25,13 @@ _MEDH5_IMPORT_HINT = (
     "Install it with: pip install nnunetv2[medh5]  (or: pip install medh5)"
 )
 
+# Reserved channel name used by the converter and write_seg to store the original
+# integer-labelled segmentation alongside the per-class boolean masks. read_images
+# filters this entry out so it never appears as a modality; read_seg prefers it
+# over reconstructing the seg from boolean masks (which would be lossy for
+# region-based labels).
+RESERVED_INT_SEG_KEY = '_nnunet_int_seg_v1'
+
 
 def _import_medh5():
     try:
@@ -69,28 +76,39 @@ class Medh5IO(BaseReaderWriter):
     def _read_one(self, fname: str):
         medh5file = _import_medh5()
         sample = medh5file.read(fname)
-        names = list(sample.meta.image_names) if sample.meta.image_names else sorted(sample.images.keys())
-        # Stack modalities along the channel axis in a deterministic order
-        arrays = [np.asarray(sample.images[n]) for n in names]
+        extras = sample.meta.extra or {}
+        # Prefer the original index ordering recorded by the converter, since
+        # medh5 sorts image_names alphabetically internally — falling back to
+        # that sort would silently permute channels vs. the source dataset.json.
+        preferred_order = None
+        if isinstance(extras, dict):
+            preferred_order = extras.get('nnunet_channel_order')
+        if preferred_order:
+            names = [n for n in preferred_order if n in sample.images]
+        else:
+            names = list(sample.meta.image_names) if sample.meta.image_names else sorted(sample.images.keys())
+        # Filter reserved entries that are not real modalities (e.g. the
+        # integer-labelled seg stored for lossless round-trip).
+        modality_names = [n for n in names if n != RESERVED_INT_SEG_KEY]
+        arrays = [np.asarray(sample.images[n]) for n in modality_names]
         if not arrays:
             raise RuntimeError(f"medh5 file has no images: {fname}")
         ref_shape = arrays[0].shape
-        for n, a in zip(names, arrays):
+        for n, a in zip(modality_names, arrays):
             if a.shape != ref_shape:
                 raise RuntimeError(
-                    f"Inconsistent modality shapes in {fname}: '{names[0]}'={ref_shape}, '{n}'={a.shape}"
+                    f"Inconsistent modality shapes in {fname}: '{modality_names[0]}'={ref_shape}, '{n}'={a.shape}"
                 )
         stacked = np.stack(arrays, axis=0).astype(np.float32, copy=False)
         spatial = sample.meta.spatial
         spacing = list(spatial.spacing) if spatial.spacing is not None else [1.0] * stacked.ndim
-        extras = sample.meta.extra or {}
         label_mapping = extras.get('nnunet_labels') if isinstance(extras, dict) else None
         info = {
             'origin': list(spatial.origin) if spatial.origin is not None else None,
             'direction': [list(r) for r in spatial.direction] if spatial.direction is not None else None,
             'axis_labels': list(spatial.axis_labels) if spatial.axis_labels is not None else None,
             'coord_system': spatial.coord_system,
-            'image_names': names,
+            'image_names': modality_names,
             'label_mapping': label_mapping,
             'patch_size': list(sample.meta.patch_size) if sample.meta.patch_size is not None else None,
             'seg_names': list(sample.meta.seg_names) if sample.meta.seg_names else None,
@@ -139,6 +157,18 @@ class Medh5IO(BaseReaderWriter):
 
     def read_seg(self, seg_fname: str) -> Tuple[np.ndarray, dict]:
         arr, spacing, info, sample = self._read_one(seg_fname)
+
+        # Preferred path: the converter / write_seg stores the original
+        # integer-labelled volume under RESERVED_INT_SEG_KEY so round-tripping
+        # is bit-exact even for region-based labels (where the per-class
+        # boolean masks would be lossy).
+        if RESERVED_INT_SEG_KEY in sample.images:
+            int_seg = np.asarray(sample.images[RESERVED_INT_SEG_KEY]).astype(np.float32, copy=False)
+            properties = {
+                'spacing': spacing,
+                'medh5_stuff': info,
+            }
+            return int_seg[None], properties
 
         # Reconstruct an integer-labelled (1, x, y, z) volume from the per-class boolean masks
         seg_masks = sample.seg or {}
@@ -202,10 +232,12 @@ class Medh5IO(BaseReaderWriter):
         int_dtype = np.uint8 if max_val < 256 else np.uint16
         seg_int = seg.astype(int_dtype, copy=False)
 
-        # Always emit the integer prediction as an image entry so the file is valid
-        # even if no label_mapping is known. When label_mapping is available, also
-        # split into per-class boolean masks for native medh5 consumers.
-        images = {'prediction': seg_int}
+        # Always emit the integer prediction under the reserved key so the file
+        # is valid (medh5 requires at least one image) and so read_seg can
+        # round-trip the integer labels bit-exactly. When label_mapping is also
+        # available, additionally split into per-class boolean masks for native
+        # medh5 consumers.
+        images = {RESERVED_INT_SEG_KEY: seg_int}
         seg_masks = None
         label_mapping = info.get('label_mapping')
         if isinstance(label_mapping, dict) and label_mapping:
