@@ -96,6 +96,10 @@ def test_logdir_override_env(tmp_path, monkeypatch):
     assert len(runs) == 1
 
 
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses chmod read-only restrictions",
+)
 def test_unwritable_logdir_raises_in_init(tmp_path, monkeypatch):
     bad = tmp_path / "nope"
     bad.mkdir()
@@ -115,3 +119,41 @@ def test_log_after_self_disable_is_noop(tmp_path):
     logger.log_images("x", np.zeros((3, 4, 4), dtype=np.float32), 0)
     logger.log_summary("y", 0.1)
     logger.close()
+
+
+def test_logdir_override_does_not_collide_in_same_second(tmp_path, monkeypatch):
+    """Two instantiations within the same wall-clock second must get distinct logdirs."""
+    override = tmp_path / "centralized"
+    monkeypatch.setenv("nnUNet_tb_logdir", str(override))
+    logger_a = TensorboardLogger(str(tmp_path / "out"), resume=False)
+    logger_b = TensorboardLogger(str(tmp_path / "out"), resume=False)
+    try:
+        assert logger_a.logdir != logger_b.logdir, \
+            "back-to-back inits must get distinct logdirs (microsecond precision)"
+    finally:
+        logger_a.close()
+        logger_b.close()
+
+
+def test_log_summary_nan_is_not_paired_with_hparams(tmp_path):
+    """NaN/Inf summary values still get logged as scalars but must not corrupt the hparams view."""
+    logger = TensorboardLogger(str(tmp_path), resume=False)
+    logger.update_config({"lr": 0.001})
+    logger.log_summary("final_val/foreground_dice", float("nan"))
+    logger.close()
+
+    assert "final_val/foreground_dice" not in logger._summary_metrics, \
+        "NaN must not be stored in _summary_metrics (would corrupt hparams view)"
+
+
+def test_flatten_for_hparams_coerces_numpy_scalars():
+    from nnunetv2.training.logging.nnunet_logger import _flatten_for_hparams
+    config = {
+        "patch_size": np.int64(128),
+        "spacing": np.float32(1.5),
+        "nested": {"depth": np.int32(5)},
+    }
+    flat = _flatten_for_hparams(config)
+    assert flat["patch_size"] == 128 and isinstance(flat["patch_size"], int)
+    assert flat["spacing"] == pytest.approx(1.5) and isinstance(flat["spacing"], float)
+    assert flat["nested.depth"] == 5 and isinstance(flat["nested.depth"], int)

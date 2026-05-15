@@ -1,13 +1,17 @@
+import math
+import os
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
 import matplotlib
+import numpy as np
 from batchgenerators.utilities.file_and_folder_operations import join
 
 matplotlib.use('agg')
 import seaborn as sns
 import matplotlib.pyplot as plt
-from typing import Any
-from pathlib import Path
-import shutil
-import os
 
 try:
     import wandb
@@ -18,9 +22,6 @@ try:
     from torch.utils.tensorboard import SummaryWriter
 except ImportError:
     SummaryWriter = None
-
-from datetime import datetime as _datetime
-import shutil as _shutil
 
 
 def get_cluster_job_id():
@@ -336,20 +337,22 @@ class TensorboardLogger:
 
         override = os.getenv("nnUNet_tb_logdir")
         if override:
-            run_name = f"{self.output_folder.name}__{_datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            # Microsecond precision avoids collisions when two runs start in the same second
+            # (DDP startup, array jobs sharing nnUNet_tb_logdir, fast test re-runs).
+            run_name = f"{self.output_folder.name}__{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
             self.logdir = Path(override) / run_name
         else:
             self.logdir = self.output_folder / "tensorboard"
 
         # If not resuming and a previous logdir exists, archive (don't delete) it.
         if not self.resume and self.logdir.exists() and any(self.logdir.iterdir()):
-            archive_name = f"old_{_datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            archive_name = f"old_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
             archive_path = self.logdir / archive_name
             archive_path.mkdir(parents=True, exist_ok=True)
             for entry in list(self.logdir.iterdir()):
                 if entry.name.startswith("old_"):
                     continue
-                _shutil.move(str(entry), str(archive_path / entry.name))
+                shutil.move(str(entry), str(archive_path / entry.name))
 
         self.logdir.mkdir(parents=True, exist_ok=True)
         self.writer = SummaryWriter(log_dir=str(self.logdir))
@@ -376,7 +379,9 @@ class TensorboardLogger:
         try:
             numeric = float(value)
             self.writer.add_scalar(f"summary/{key}", numeric)
-            self._summary_metrics[key] = numeric
+            # Only pair finite metrics with hparams; NaN/Inf would corrupt the TB hparams view.
+            if math.isfinite(numeric):
+                self._summary_metrics[key] = numeric
         except (TypeError, ValueError):
             try:
                 self.writer.add_text(f"summary/{key}", str(value))
@@ -420,6 +425,10 @@ def _flatten_for_hparams(config: dict, prefix: str = "") -> dict:
         key = f"{prefix}.{k}" if prefix else str(k)
         if isinstance(v, dict):
             flat.update(_flatten_for_hparams(v, key))
+        elif isinstance(v, np.generic):
+            # numpy scalars (e.g., np.int64 patch sizes from plans dict) -> native Python so
+            # TB treats them as numeric axes in the hparams view, not categorical strings.
+            flat[key] = v.item()
         elif isinstance(v, (int, float, str, bool)):
             flat[key] = v
         elif v is None:
