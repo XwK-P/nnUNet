@@ -142,7 +142,10 @@ class MetaLogger(object):
         self.local_logger.load_checkpoint(checkpoint)
 
     def log_images(self, tag: str, image, step: int):
-        """Forward an image to any plugin logger that supports it."""
+        """Forward an image to any plugin logger that supports it.
+
+        Images are plugin-only; LocalLogger only stores per-epoch scalars and is skipped.
+        """
         for logger in self.loggers:
             if hasattr(logger, "log_images"):
                 logger.log_images(tag, image, step)

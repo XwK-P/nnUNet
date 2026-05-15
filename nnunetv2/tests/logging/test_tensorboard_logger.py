@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pytest
 
-from nnunetv2.training.logging.nnunet_logger import TensorboardLogger
+from nnunetv2.training.logging.nnunet_logger import MetaLogger, TensorboardLogger
 
 
 def _read_events(logdir):
@@ -167,11 +167,6 @@ def test_flatten_for_hparams_coerces_numpy_scalars():
     assert flat["patch_size"] == 128 and isinstance(flat["patch_size"], int)
     assert flat["spacing"] == pytest.approx(1.5) and isinstance(flat["spacing"], float)
     assert flat["nested.depth"] == 5 and isinstance(flat["nested.depth"], int)
-
-
-from nnunetv2.training.logging.nnunet_logger import MetaLogger
-
-
 def test_metalogger_registers_tensorboard_by_default(tmp_path, monkeypatch):
     monkeypatch.delenv("nnUNet_tensorboard_disabled", raising=False)
     ml = MetaLogger(str(tmp_path), resume=False, local_rank=0)
