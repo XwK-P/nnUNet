@@ -1170,14 +1170,18 @@ class nnUNetTrainer(object):
         if self.local_rank != 0:
             return
         every_n = self._parse_int_env("nnUNet_tb_image_every_n_epochs", default=50, minimum=0)
-        if every_n == 0 or self.current_epoch % every_n != 0:
+        if every_n == 0:
+            return
+        if self.current_epoch % every_n != 0:
             return
         num_samples = self._parse_int_env("nnUNet_tb_image_num_samples", default=4, minimum=1)
         try:
             self.network.eval()
-            with torch.no_grad():
+            autocast_ctx = autocast(self.device.type, enabled=True) if self.device.type == 'cuda' else dummy_context()
+            with torch.no_grad(), autocast_ctx:
                 batch = next(self.dataloader_val)
                 data = batch['data'][:num_samples].to(self.device, non_blocking=True)
+                # When deep supervision is on, both target and output are lists with index 0 = highest resolution.
                 target = batch['target'][0] if isinstance(batch['target'], list) else batch['target']
                 target = target[:num_samples]
                 output = self.network(data)
