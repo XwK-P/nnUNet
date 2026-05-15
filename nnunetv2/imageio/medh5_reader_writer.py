@@ -157,15 +157,9 @@ class Medh5IO(BaseReaderWriter):
                     f"falling back to alphabetical mapping: {label_mapping}"
                 )
 
-            max_label = 0
-            for v in label_mapping.values():
-                if isinstance(v, (list, tuple)):
-                    if v:
-                        max_label = max(max_label, max(int(x) for x in v))
-                else:
-                    max_label = max(max_label, int(v))
-            dtype = np.uint8 if max_label < 256 else np.uint16
-            seg = np.zeros(ref_shape, dtype=dtype)
+            # float32 to match SimpleITKIO/NibabelIO and allow downstream sentinels (e.g. -1
+            # written by crop_to_nonzero) to fit in the same array.
+            seg = np.zeros(ref_shape, dtype=np.float32)
             for class_name, label_value in label_mapping.items():
                 if class_name not in seg_masks:
                     continue  # background or missing class
@@ -178,9 +172,9 @@ class Medh5IO(BaseReaderWriter):
                     # Region-based label: assign the first int in the list (preserves region membership)
                     if not label_value:
                         continue
-                    seg[mask] = int(label_value[0])
+                    seg[mask] = float(label_value[0])
                 else:
-                    seg[mask] = int(label_value)
+                    seg[mask] = float(label_value)
             seg = seg[None]
         else:
             # No per-class boolean masks; treat the (single) image as the integer labelling.
@@ -190,7 +184,7 @@ class Medh5IO(BaseReaderWriter):
                     f"Cannot interpret {seg_fname} as a segmentation: it has {arr.shape[0]} image channels "
                     f"and no 'seg' group."
                 )
-            seg = arr.astype(np.int16, copy=False)
+            seg = arr.astype(np.float32, copy=False)
 
         properties = {
             'spacing': spacing,
