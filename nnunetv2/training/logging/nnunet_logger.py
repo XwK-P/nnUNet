@@ -380,6 +380,8 @@ class TensorboardLogger:
             numeric = float(value)
             self.writer.add_scalar(f"summary/{key}", numeric)
             # Only pair finite metrics with hparams; NaN/Inf would corrupt the TB hparams view.
+            # If a non-finite value arrives after a finite one for the same key, the prior
+            # finite value is preserved (last-valid-wins).
             if math.isfinite(numeric):
                 self._summary_metrics[key] = numeric
         except (TypeError, ValueError):

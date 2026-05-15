@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -135,15 +134,26 @@ def test_logdir_override_does_not_collide_in_same_second(tmp_path, monkeypatch):
         logger_b.close()
 
 
-def test_log_summary_nan_is_not_paired_with_hparams(tmp_path):
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_log_summary_non_finite_is_not_paired_with_hparams(tmp_path, bad_value):
     """NaN/Inf summary values still get logged as scalars but must not corrupt the hparams view."""
     logger = TensorboardLogger(str(tmp_path), resume=False)
     logger.update_config({"lr": 0.001})
-    logger.log_summary("final_val/foreground_dice", float("nan"))
+    logger.log_summary("final_val/foreground_dice", bad_value)
     logger.close()
 
     assert "final_val/foreground_dice" not in logger._summary_metrics, \
-        "NaN must not be stored in _summary_metrics (would corrupt hparams view)"
+        f"non-finite value {bad_value} must not be stored in _summary_metrics"
+
+
+def test_log_summary_non_finite_preserves_prior_finite_value(tmp_path):
+    """A later non-finite update must not evict a previously-stored finite metric."""
+    logger = TensorboardLogger(str(tmp_path), resume=False)
+    logger.log_summary("final_val/foreground_dice", 0.85)
+    logger.log_summary("final_val/foreground_dice", float("nan"))
+    logger.close()
+
+    assert logger._summary_metrics["final_val/foreground_dice"] == pytest.approx(0.85)
 
 
 def test_flatten_for_hparams_coerces_numpy_scalars():
