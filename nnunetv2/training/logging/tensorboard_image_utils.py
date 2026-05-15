@@ -14,9 +14,15 @@ _COLORMAP = matplotlib.colormaps["tab10"]
 
 
 def _to_label_map(arr: np.ndarray, spatial_ndim: int) -> np.ndarray:
-    """Collapse a region-based multi-channel target to a single-channel label map."""
-    if arr.ndim == spatial_ndim + 1:
+    """Collapse a region-based multi-channel target to a single-channel label map.
+
+    A leading channel of size 1 is treated as a redundant dim (squeezed) rather
+    than argmaxed, which would silently zero everything out.
+    """
+    if arr.ndim == spatial_ndim + 1 and arr.shape[0] > 1:
         return np.argmax(arr, axis=0).astype(np.int64)
+    if arr.ndim == spatial_ndim + 1 and arr.shape[0] == 1:
+        return arr[0].astype(np.int64)
     return arr.astype(np.int64)
 
 
@@ -47,6 +53,8 @@ def _overlay(rgb_chw: np.ndarray, label_map: np.ndarray) -> np.ndarray:
     for lbl in unique_labels:
         if lbl == 0:
             continue
+        # tab10 has 10 colors; classes >= 10 wrap around. Acceptable: nnU-Net rarely has >10 fg classes,
+        # and a colliding color is better than a hard cap or a noisier colormap.
         color = np.array(_COLORMAP(int(lbl) % 10)[:3], dtype=np.float32)  # (3,)
         mask = (label_map == lbl)
         for c in range(3):

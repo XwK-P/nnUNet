@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from nnunetv2.training.logging.tensorboard_image_utils import render_sample
 
@@ -64,3 +63,50 @@ def test_render_sample_constant_input_does_not_divide_by_zero():
     out = render_sample(data, target, pred)
     assert out.shape == (3, 16, 24 * 3)
     assert np.isfinite(out).all()
+
+
+def test_render_sample_overlay_modifies_pixels_inside_label():
+    data = np.full((1, 8, 8), 0.5, dtype=np.float32)
+    target = np.zeros((8, 8), dtype=np.int64)
+    target[2:5, 2:5] = 1
+    pred = np.zeros((8, 8), dtype=np.int64)
+    pred[2:5, 2:5] = 1
+
+    out = render_sample(data, target, pred)
+    left, mid, right = out[:, :, :8], out[:, :, 8:16], out[:, :, 16:]
+
+    assert not np.allclose(mid[:, 2:5, 2:5], left[:, 2:5, 2:5]), \
+        "GT overlay should modify pixels inside the labeled region"
+    assert not np.allclose(right[:, 2:5, 2:5], left[:, 2:5, 2:5]), \
+        "Pred overlay should modify pixels inside the labeled region"
+    np.testing.assert_allclose(mid[:, :2, :], left[:, :2, :])
+    np.testing.assert_allclose(right[:, :2, :], left[:, :2, :])
+
+
+def test_render_sample_distinct_labels_get_distinct_colors():
+    data = np.full((1, 8, 16), 0.5, dtype=np.float32)
+    target = np.zeros((8, 16), dtype=np.int64)
+    target[2:6, 2:6] = 1
+    target[2:6, 10:14] = 2
+    pred = np.zeros((8, 16), dtype=np.int64)
+
+    out = render_sample(data, target, pred)
+    mid = out[:, :, 16:32]
+
+    color_label_1 = mid[:, 3, 3]
+    color_label_2 = mid[:, 3, 11]
+    assert not np.allclose(color_label_1, color_label_2), \
+        "tab10 should give distinct colors to distinct labels"
+
+
+def test_render_sample_squeezes_singleton_channel_target_without_zeroing():
+    data = np.random.randn(1, 8, 16, 24).astype(np.float32)
+    target = np.zeros((1, 8, 16, 24), dtype=np.int64)
+    target[0, 4, 4:10, 6:14] = 1
+    pred = np.zeros((8, 16, 24), dtype=np.int64)
+    pred[4, 4:10, 6:14] = 1
+
+    out = render_sample(data, target, pred)
+    left, mid, _ = out[:, :, :24], out[:, :, 24:48], out[:, :, 48:]
+    assert not np.allclose(mid[:, 4:10, 6:14], left[:, 4:10, 6:14]), \
+        "singleton-channel target should not be silently zeroed by argmax"
