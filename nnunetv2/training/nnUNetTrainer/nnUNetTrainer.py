@@ -179,7 +179,7 @@ class nnUNetTrainer(object):
         self.log_file = join(self.output_folder, "training_log_%d_%d_%d_%02.0d_%02.0d_%02.0d.txt" %
                              (timestamp.year, timestamp.month, timestamp.day, timestamp.hour, timestamp.minute,
                               timestamp.second))
-        self.logger = MetaLogger(self.output_folder, continue_training)
+        self.logger = MetaLogger(self.output_folder, continue_training, local_rank=self.local_rank)
         self.logger.update_config(logger_config)
 
         ### placeholders
