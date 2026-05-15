@@ -14,7 +14,7 @@ import torch
 from acvl_utils.cropping_and_padding.padding import pad_nd_image
 from batchgenerators.dataloading.multi_threaded_augmenter import MultiThreadedAugmenter
 from batchgenerators.utilities.file_and_folder_operations import load_json, join, isfile, maybe_mkdir_p, isdir, subdirs, \
-    save_json
+    save_json, subfiles
 from torch import nn
 from torch._dynamo import OptimizedModule
 from torch.nn.parallel import DistributedDataParallel
@@ -176,6 +176,56 @@ class nnUNetPredictor(object):
         print(f'found the following folds: {use_folds}')
         return use_folds
 
+    def _is_bundled_medh5(self, sample_path: str) -> bool:
+        """Peek at a .medh5 file's metadata to decide if it bundles all modalities.
+
+        A file is bundled when its modality count matches the dataset_json's
+        declared channel count (so one file per case represents a complete
+        sample). Otherwise the layout is split (one channel per file, grouped
+        by `_XXXX` suffix), the same convention classic nnU-Net uses.
+
+        For single-channel datasets the modality count is the same in both
+        layouts, so we additionally inspect the filename: a trailing
+        `_<4 digits>.medh5` indicates the split layout.
+        """
+        try:
+            from nnunetv2.imageio.medh5_reader_writer import RESERVED_INT_SEG_KEY, _import_medh5
+            medh5file = _import_medh5()
+            meta = medh5file.read_meta(sample_path)
+        except Exception:
+            # If we can't read it, fall back to the split-layout discovery path —
+            # safer than asserting bundled and producing wrong outputs.
+            return False
+        # Strong signal: nnUNetv2_convert_to_medh5 stamps every bundled file with
+        # `nnunet_channel_order` in extras. Trust it when present — this is the
+        # only way to handle single-channel bundled files whose case IDs
+        # naturally end in `_<4 digits>` (e.g. BraTS_0001.medh5), which the
+        # filename-suffix heuristic below cannot distinguish from split.
+        extras = meta.extra or {}
+        if isinstance(extras, dict) and extras.get('nnunet_channel_order'):
+            return True
+        modality_count = sum(
+            1 for n in (meta.image_names or []) if n != RESERVED_INT_SEG_KEY
+        )
+        declared_channels = len(self.dataset_json.get('channel_names', {}) or {})
+        if declared_channels == 0:
+            # No channel_names info — fall back to: bundled iff >1 modality in file.
+            return modality_count > 1
+        if modality_count < declared_channels:
+            return False  # this file is one channel of a multi-channel split case
+        if modality_count > declared_channels:
+            return True  # extras beyond the declared set; treat as bundled
+        # modality_count == declared_channels:
+        if declared_channels > 1:
+            return True  # the file holds every declared channel → bundled
+        # Single-channel ambiguity (no `nnunet_channel_order` marker): both
+        # bundled (case.medh5) and split (case_0000.medh5) have one modality
+        # per file. Heuristic: trailing `_<4 digits>.medh5` means split. This
+        # only catches the user-made-without-marker case; converter outputs
+        # are already disambiguated above.
+        import re as _re
+        return _re.match(r".*_\d{4}\.medh5$", os.path.basename(sample_path)) is None
+
     def _manage_input_and_output_lists(self, list_of_lists_or_source_folder: Union[str, List[List[str]]],
                                        output_folder_or_list_of_truncated_output_files: Union[None, str, List[str]],
                                        folder_with_segs_from_prev_stage: str = None,
@@ -183,12 +233,33 @@ class nnUNetPredictor(object):
                                        part_id: int = 0,
                                        num_parts: int = 1,
                                        save_probabilities: bool = False):
+        file_ending = self.dataset_json['file_ending']
+        bundled_format = False
         if isinstance(list_of_lists_or_source_folder, str):
-            list_of_lists_or_source_folder = create_lists_from_splitted_dataset_folder(list_of_lists_or_source_folder,
-                                                                                       self.dataset_json['file_ending'])
+            if file_ending == '.medh5':
+                # Auto-detect bundled vs split layout by peeking at the first file's
+                # modality count and comparing it to the dataset_json's declared
+                # channel count. This is more reliable than filename pattern matching
+                # since common nnU-Net case IDs naturally end in _XXXX (e.g.
+                # 'BraTS_0001'), which would alias with the split-layout suffix.
+                fnames = sorted(subfiles(list_of_lists_or_source_folder, suffix=file_ending, join=False))
+                if fnames:
+                    bundled_format = self._is_bundled_medh5(join(list_of_lists_or_source_folder, fnames[0]))
+            if bundled_format:
+                # Bundled single-file-per-case format does not use _XXXX channel suffixes
+                files = sorted(subfiles(list_of_lists_or_source_folder, suffix=file_ending, join=True))
+                list_of_lists_or_source_folder = [[f] for f in files]
+            else:
+                list_of_lists_or_source_folder = create_lists_from_splitted_dataset_folder(list_of_lists_or_source_folder,
+                                                                                           file_ending)
+        elif file_ending == '.medh5' and isinstance(list_of_lists_or_source_folder, list) \
+                and list_of_lists_or_source_folder and len(list_of_lists_or_source_folder[0]) == 1:
+            # Caller passed an already-formed list. Inspect the first entry the same way.
+            bundled_format = self._is_bundled_medh5(list_of_lists_or_source_folder[0][0])
         print(f'There are {len(list_of_lists_or_source_folder)} cases in the source folder')
         list_of_lists_or_source_folder = list_of_lists_or_source_folder[part_id::num_parts]
-        caseids = [os.path.basename(i[0])[:-(len(self.dataset_json['file_ending']) + 5)] for i in
+        suffix_len = len(file_ending) if bundled_format else len(file_ending) + 5
+        caseids = [os.path.basename(i[0])[:-suffix_len] for i in
                    list_of_lists_or_source_folder]
         print(
             f'I am process {part_id} out of {num_parts} (max process ID is {num_parts - 1}, we start counting with 0!)')

@@ -80,6 +80,7 @@ nnUNetv2_move_plans_between_datasets = "nnunetv2.experiment_planning.plans_for_p
 nnUNetv2_evaluate_folder = "nnunetv2.evaluation.evaluate_predictions:evaluate_folder_entry_point"
 nnUNetv2_evaluate_simple = "nnunetv2.evaluation.evaluate_predictions:evaluate_simple_entry_point"
 nnUNetv2_convert_MSD_dataset = "nnunetv2.dataset_conversion.convert_MSD_dataset:entry_point"
+nnUNetv2_convert_to_medh5 = "nnunetv2.dataset_conversion.convert_to_medh5:main"
 
 [project.optional-dependencies]
 dev = [
@@ -88,6 +89,9 @@ dev = [
 intel_macos = [
     "torch<2.3",
     "numpy<2",
+]
+medh5 = [
+    "medh5>=0.6.0",
 ]
 
 [tool.setuptools.packages.find]
