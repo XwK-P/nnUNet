@@ -184,15 +184,31 @@ class nnUNetPredictor(object):
                                        num_parts: int = 1,
                                        save_probabilities: bool = False):
         file_ending = self.dataset_json['file_ending']
-        bundled_format = file_ending == '.medh5'
+        bundled_format = False
         if isinstance(list_of_lists_or_source_folder, str):
+            if file_ending == '.medh5':
+                # Auto-detect bundled vs split layout: a bundled folder has at
+                # least one .medh5 file whose stem does NOT end in _XXXX. A split
+                # folder (case_0000.medh5, case_0001.medh5, ...) is handled by
+                # the same _XXXX discovery path as classic nnU-Net.
+                import re as _re
+                _chan_re = _re.compile(r".*_\d{4}" + _re.escape(file_ending) + r"$")
+                fnames = subfiles(list_of_lists_or_source_folder, suffix=file_ending, join=False)
+                bundled_format = bool(fnames) and not all(_chan_re.match(f) for f in fnames)
             if bundled_format:
-                # Bundled single-file-per-case formats do not use _XXXX channel suffixes
+                # Bundled single-file-per-case format does not use _XXXX channel suffixes
                 files = sorted(subfiles(list_of_lists_or_source_folder, suffix=file_ending, join=True))
                 list_of_lists_or_source_folder = [[f] for f in files]
             else:
                 list_of_lists_or_source_folder = create_lists_from_splitted_dataset_folder(list_of_lists_or_source_folder,
                                                                                            file_ending)
+        elif file_ending == '.medh5' and isinstance(list_of_lists_or_source_folder, list) \
+                and list_of_lists_or_source_folder and len(list_of_lists_or_source_folder[0]) == 1:
+            # Caller passed an already-formed list. Detect bundled vs split from the
+            # first entry's filename so we strip the right number of chars below.
+            import re as _re
+            _chan_re = _re.compile(r".*_\d{4}" + _re.escape(file_ending) + r"$")
+            bundled_format = not _chan_re.match(os.path.basename(list_of_lists_or_source_folder[0][0]))
         print(f'There are {len(list_of_lists_or_source_folder)} cases in the source folder')
         list_of_lists_or_source_folder = list_of_lists_or_source_folder[part_id::num_parts]
         suffix_len = len(file_ending) if bundled_format else len(file_ending) + 5

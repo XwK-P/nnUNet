@@ -231,17 +231,19 @@ def convert_to_medh5(source_dataset_name_or_id,
     if isdir(imagesTs):
         source_file_ending = source_dataset_json['file_ending']
         test_files = subfiles(imagesTs, suffix=source_file_ending, join=False, sort=True)
-        # Identify case ids by stripping `_XXXX.<ext>` (standard nnU-Net convention)
+        # Identify case ids by stripping `_XXXX.<ext>` (standard nnU-Net convention).
+        # Mirror utils.create_paths_fn: use a fullmatch regex anchored to
+        # <case_id>_XXXX<ext>, NOT startswith — otherwise `case_extra_0000.nii.gz`
+        # would be incorrectly matched as a channel of case `case`.
+        import re
         ts_case_ids = sorted({f[:-(len(source_file_ending) + 5)] for f in test_files})
         if ts_case_ids:
             maybe_mkdir_p(target_data_test)
             ts_case_args = []
-            import re
-            channel_re = re.compile(r"_\d{4}" + re.escape(source_file_ending) + r"$")
             for case_id in ts_case_ids:
+                case_re = re.compile(re.escape(case_id) + r"_\d{4}" + re.escape(source_file_ending))
                 imgs = sorted(
-                    join(imagesTs, f) for f in test_files
-                    if f.startswith(case_id + '_') and channel_re.search(f) is not None
+                    join(imagesTs, f) for f in test_files if case_re.fullmatch(f)
                 )
                 if not imgs:
                     continue
