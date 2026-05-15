@@ -184,9 +184,9 @@ class nnUNetPredictor(object):
         sample). Otherwise the layout is split (one channel per file, grouped
         by `_XXXX` suffix), the same convention classic nnU-Net uses.
 
-        This is the only reliable signal — common nnU-Net case IDs like
-        `BraTS_0001` cause filename-only heuristics to misclassify bundled
-        files as split.
+        For single-channel datasets the modality count is the same in both
+        layouts, so we additionally inspect the filename: a trailing
+        `_<4 digits>.medh5` indicates the split layout.
         """
         try:
             from nnunetv2.imageio.medh5_reader_writer import RESERVED_INT_SEG_KEY, _import_medh5
@@ -203,7 +203,18 @@ class nnUNetPredictor(object):
         if declared_channels == 0:
             # No channel_names info — fall back to: bundled iff >1 modality in file.
             return modality_count > 1
-        return modality_count == declared_channels
+        if modality_count < declared_channels:
+            return False  # this file is one channel of a multi-channel split case
+        if modality_count > declared_channels:
+            return True  # extras beyond the declared set; treat as bundled
+        # modality_count == declared_channels:
+        if declared_channels > 1:
+            return True  # the file holds every declared channel → bundled
+        # Single-channel ambiguity: both bundled (case.medh5) and split
+        # (case_0000.medh5) have one modality per file. Disambiguate by the
+        # filename's _XXXX suffix.
+        import re as _re
+        return _re.match(r".*_\d{4}\.medh5$", os.path.basename(sample_path)) is None
 
     def _manage_input_and_output_lists(self, list_of_lists_or_source_folder: Union[str, List[List[str]]],
                                        output_folder_or_list_of_truncated_output_files: Union[None, str, List[str]],
