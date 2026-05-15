@@ -58,6 +58,7 @@ from nnunetv2.training.data_augmentation.compute_initial_patch_size import get_p
 from nnunetv2.training.dataloading.nnunet_dataset import infer_dataset_class
 from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.logging.nnunet_logger import MetaLogger
+from nnunetv2.training.logging.tensorboard_image_utils import render_sample
 from nnunetv2.training.loss.compound_losses import DC_and_CE_loss, DC_and_BCE_loss
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 from nnunetv2.training.loss.dice import get_tp_fp_fn_tn, MemoryEfficientSoftDiceLoss
@@ -1162,6 +1163,51 @@ class nnUNetTrainer(object):
         self.logger.log('mean_fg_dice', mean_fg_dice, self.current_epoch)
         self.logger.log('dice_per_class_or_region', global_dc_per_class, self.current_epoch)
         self.logger.log('val_losses', loss_here, self.current_epoch)
+        self._maybe_log_validation_images()
+
+    def _maybe_log_validation_images(self):
+        """Periodically log a small batch of validation samples to TB-style loggers."""
+        if self.local_rank != 0:
+            return
+        every_n = self._parse_int_env("nnUNet_tb_image_every_n_epochs", default=50, minimum=0)
+        if every_n == 0 or self.current_epoch % every_n != 0:
+            return
+        num_samples = self._parse_int_env("nnUNet_tb_image_num_samples", default=4, minimum=1)
+        try:
+            self.network.eval()
+            with torch.no_grad():
+                batch = next(self.dataloader_val)
+                data = batch['data'][:num_samples].to(self.device, non_blocking=True)
+                target = batch['target'][0] if isinstance(batch['target'], list) else batch['target']
+                target = target[:num_samples]
+                output = self.network(data)
+                output = output[0] if isinstance(output, (list, tuple)) else output
+                pred_seg = output.argmax(1).cpu().numpy()
+                data_np = data.cpu().numpy()
+                target_np = target.detach().cpu().numpy() if hasattr(target, 'detach') else np.asarray(target)
+            n = min(num_samples, data_np.shape[0])
+            for i in range(n):
+                img = render_sample(data_np[i], target_np[i], pred_seg[i])
+                self.logger.log_images(f"val_samples/sample_{i}", img, self.current_epoch)
+        except Exception as e:
+            self.print_to_log_file(f"[TB image logging] skipped this epoch: {e}")
+        finally:
+            self.network.train()
+
+    @staticmethod
+    def _parse_int_env(name: str, default: int, minimum: int = 0) -> int:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            print(f"[nnUNetTrainer] env {name}={raw!r} is not an int, using default {default}")
+            return default
+        if value < minimum:
+            print(f"[nnUNetTrainer] env {name}={value} below minimum {minimum}, using default {default}")
+            return default
+        return value
 
     def on_epoch_start(self):
         self.logger.log('epoch_start_timestamps', time(), self.current_epoch)
