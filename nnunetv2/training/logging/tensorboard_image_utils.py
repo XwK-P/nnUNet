@@ -6,11 +6,11 @@ Pure numpy/matplotlib — no torch or nnU-Net imports. Produces a single
 """
 from __future__ import annotations
 
+import matplotlib
 import numpy as np
-from matplotlib import cm
 
 _OVERLAY_ALPHA = 0.4
-_COLORMAP = cm.get_cmap("tab10")
+_COLORMAP = matplotlib.colormaps["tab10"]
 
 
 def _to_label_map(arr: np.ndarray, spatial_ndim: int) -> np.ndarray:
