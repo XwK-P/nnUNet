@@ -267,6 +267,13 @@ def convert_to_medh5(source_dataset_name_or_id,
     new_dataset_json['overwrite_image_reader_writer'] = 'Medh5IO'
     new_dataset_json['labels'] = _normalize_labels(source_dataset_json['labels'])
     new_dataset_json['numTraining'] = len(case_args)
+    # Normalize legacy `modality` key to `channel_names` — verify_dataset_integrity
+    # requires `channel_names`, and Medh5IO's bundled-vs-split detector reads it to
+    # count declared channels. The source converter (_convert_case) already accepts
+    # either key, but the emitted JSON must use the modern name.
+    if 'channel_names' not in new_dataset_json and 'modality' in new_dataset_json:
+        new_dataset_json['channel_names'] = deepcopy(new_dataset_json['modality'])
+    new_dataset_json.pop('modality', None)
     new_dataset_json['dataset'] = {
         case_id: {
             'images': [join('data', f"{case_id}.medh5")],
