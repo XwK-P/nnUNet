@@ -70,7 +70,8 @@ def render_sample(data: np.ndarray, target: np.ndarray, pred: np.ndarray) -> np.
               Only channel 0 is rendered.
         target: Ground truth labels. Either ``(H, W)`` / ``(D, H, W)`` integer label map,
                 or a region-based one-hot-like array with an extra leading channel dim.
-        pred: Predicted label map, same shape conventions as ``target`` (without channel dim).
+        pred: Predicted labels, same shape conventions as ``target``. Typically a label map
+              ``(H, W)`` / ``(D, H, W)``; a leading singleton channel is tolerated.
 
     Returns:
         ``(3, H, 3*W)`` float32 array in [0, 1].
