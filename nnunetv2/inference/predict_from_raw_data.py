@@ -196,6 +196,14 @@ class nnUNetPredictor(object):
             # If we can't read it, fall back to the split-layout discovery path —
             # safer than asserting bundled and producing wrong outputs.
             return False
+        # Strong signal: nnUNetv2_convert_to_medh5 stamps every bundled file with
+        # `nnunet_channel_order` in extras. Trust it when present — this is the
+        # only way to handle single-channel bundled files whose case IDs
+        # naturally end in `_<4 digits>` (e.g. BraTS_0001.medh5), which the
+        # filename-suffix heuristic below cannot distinguish from split.
+        extras = meta.extra or {}
+        if isinstance(extras, dict) and extras.get('nnunet_channel_order'):
+            return True
         modality_count = sum(
             1 for n in (meta.image_names or []) if n != RESERVED_INT_SEG_KEY
         )
@@ -210,9 +218,11 @@ class nnUNetPredictor(object):
         # modality_count == declared_channels:
         if declared_channels > 1:
             return True  # the file holds every declared channel → bundled
-        # Single-channel ambiguity: both bundled (case.medh5) and split
-        # (case_0000.medh5) have one modality per file. Disambiguate by the
-        # filename's _XXXX suffix.
+        # Single-channel ambiguity (no `nnunet_channel_order` marker): both
+        # bundled (case.medh5) and split (case_0000.medh5) have one modality
+        # per file. Heuristic: trailing `_<4 digits>.medh5` means split. This
+        # only catches the user-made-without-marker case; converter outputs
+        # are already disambiguated above.
         import re as _re
         return _re.match(r".*_\d{4}\.medh5$", os.path.basename(sample_path)) is None
 
