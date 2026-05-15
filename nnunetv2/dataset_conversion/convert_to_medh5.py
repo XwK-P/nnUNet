@@ -121,7 +121,7 @@ def _convert_case(case_id: str,
                 f"Image/seg shape mismatch for case {case_id}: image={images_arr.shape[1:]}, seg={seg_int_float.shape}"
             )
         max_label = int(np.max(seg_int_float)) if seg_int_float.size else 0
-        int_dtype = np.uint8 if 0 <= max_label < 256 else np.int16
+        int_dtype = np.uint8 if 0 <= max_label < 256 else np.uint16
         seg_int = np.ascontiguousarray(seg_int_float.astype(int_dtype, copy=False))
         seg_dict = _split_int_seg_to_masks(seg_int, labels) or None
         # Store the original integer seg under the reserved key so round-tripping

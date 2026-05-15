@@ -90,18 +90,29 @@ class Medh5IO(BaseReaderWriter):
         # Filter reserved entries that are not real modalities (e.g. the
         # integer-labelled seg stored for lossless round-trip).
         modality_names = [n for n in names if n != RESERVED_INT_SEG_KEY]
+        if not modality_names:
+            # File contains only the reserved seg entry (e.g. a write_seg output with no
+            # other modalities). Fall back to it so the seg shape is still discoverable.
+            if RESERVED_INT_SEG_KEY in sample.images:
+                modality_names = [RESERVED_INT_SEG_KEY]
+            else:
+                raise RuntimeError(f"medh5 file has no images: {fname}")
         arrays = [np.asarray(sample.images[n]) for n in modality_names]
-        if not arrays:
-            raise RuntimeError(f"medh5 file has no images: {fname}")
         ref_shape = arrays[0].shape
         for n, a in zip(modality_names, arrays):
             if a.shape != ref_shape:
                 raise RuntimeError(
                     f"Inconsistent modality shapes in {fname}: '{modality_names[0]}'={ref_shape}, '{n}'={a.shape}"
                 )
+        if len(ref_shape) != 3:
+            raise RuntimeError(
+                f"Medh5IO currently supports 3D volumes only; got array of shape {ref_shape} in {fname}. "
+                f"2D support can be added by subclassing and reshaping to (1, H, W) with a 999 spacing sentinel."
+            )
         stacked = np.stack(arrays, axis=0).astype(np.float32, copy=False)
         spatial = sample.meta.spatial
-        spacing = list(spatial.spacing) if spatial.spacing is not None else [1.0] * stacked.ndim
+        # Spacing must match the spatial dimensions of the array (length 3 for 3D).
+        spacing = list(spatial.spacing) if spatial.spacing is not None else [1.0] * (stacked.ndim - 1)
         label_mapping = extras.get('nnunet_labels') if isinstance(extras, dict) else None
         info = {
             'origin': list(spatial.origin) if spatial.origin is not None else None,
@@ -163,12 +174,18 @@ class Medh5IO(BaseReaderWriter):
         # is bit-exact even for region-based labels (where the per-class
         # boolean masks would be lossy).
         if RESERVED_INT_SEG_KEY in sample.images:
-            int_seg = np.asarray(sample.images[RESERVED_INT_SEG_KEY]).astype(np.float32, copy=False)
+            int_seg = np.asarray(sample.images[RESERVED_INT_SEG_KEY])
+            ref_shape = arr.shape[1:]  # strip channel axis added by _read_one
+            if int_seg.shape != ref_shape:
+                raise RuntimeError(
+                    f"Reserved seg '{RESERVED_INT_SEG_KEY}' has shape {int_seg.shape}, "
+                    f"expected {ref_shape} (matching the modality channels) in {seg_fname}"
+                )
             properties = {
                 'spacing': spacing,
                 'medh5_stuff': info,
             }
-            return int_seg[None], properties
+            return int_seg.astype(np.float32, copy=False)[None], properties
 
         # Reconstruct an integer-labelled (1, x, y, z) volume from the per-class boolean masks
         seg_masks = sample.seg or {}
