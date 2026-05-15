@@ -167,3 +167,51 @@ def test_flatten_for_hparams_coerces_numpy_scalars():
     assert flat["patch_size"] == 128 and isinstance(flat["patch_size"], int)
     assert flat["spacing"] == pytest.approx(1.5) and isinstance(flat["spacing"], float)
     assert flat["nested.depth"] == 5 and isinstance(flat["nested.depth"], int)
+
+
+from nnunetv2.training.logging.nnunet_logger import MetaLogger
+
+
+def test_metalogger_registers_tensorboard_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("nnUNet_tensorboard_disabled", raising=False)
+    ml = MetaLogger(str(tmp_path), resume=False, local_rank=0)
+    try:
+        assert any(type(l).__name__ == "TensorboardLogger" for l in ml.loggers)
+    finally:
+        ml.close()
+
+
+def test_metalogger_skips_tensorboard_when_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("nnUNet_tensorboard_disabled", "1")
+    ml = MetaLogger(str(tmp_path), resume=False, local_rank=0)
+    try:
+        assert not any(type(l).__name__ == "TensorboardLogger" for l in ml.loggers)
+    finally:
+        ml.close()
+
+
+def test_metalogger_skips_tensorboard_on_nonzero_rank(tmp_path, monkeypatch):
+    monkeypatch.delenv("nnUNet_tensorboard_disabled", raising=False)
+    ml = MetaLogger(str(tmp_path), resume=False, local_rank=1)
+    try:
+        assert not any(type(l).__name__ == "TensorboardLogger" for l in ml.loggers)
+    finally:
+        ml.close()
+
+
+def test_metalogger_log_images_dispatches_to_tensorboard(tmp_path, monkeypatch):
+    monkeypatch.delenv("nnUNet_tensorboard_disabled", raising=False)
+    ml = MetaLogger(str(tmp_path), resume=False, local_rank=0)
+    img = np.zeros((3, 8, 24), dtype=np.float32)
+    ml.log_images("val/x", img, step=5)
+    ml.close()
+
+    ea = _read_events(tmp_path / "tensorboard")
+    events = ea.Images("val/x")
+    assert len(events) == 1 and events[0].step == 5
+
+
+def test_metalogger_close_is_safe_to_call_twice(tmp_path):
+    ml = MetaLogger(str(tmp_path), resume=False, local_rank=0)
+    ml.close()
+    ml.close()  # must not raise

@@ -40,20 +40,27 @@ class MetaLogger(object):
     plotting progress, and checkpointing.
     """
 
-    def __init__(self, output_folder, resume, verbose: bool = False):
+    def __init__(self, output_folder, resume, verbose: bool = False, local_rank: int = 0):
         """Initialize the meta logger.
 
         Args:
             output_folder: The output folder.
             resume: Whether to resume training if possible.
             verbose: Whether to enable verbose logging in the local logger.
+            local_rank: DDP local rank. Plugin loggers (W&B, TB) only run on rank 0.
         """
         self.output_folder = output_folder
         self.resume = resume
+        self.local_rank = local_rank
         self.loggers = []
         self.local_logger = LocalLogger(verbose)
-        if self._is_logger_enabled("nnUNet_wandb_enabled"):
+        if local_rank == 0 and self._is_logger_enabled("nnUNet_wandb_enabled"):
             self.loggers.append(WandbLogger(output_folder, resume))
+        if local_rank == 0 and not self._is_logger_disabled("nnUNet_tensorboard_disabled"):
+            try:
+                self.loggers.append(TensorboardLogger(output_folder, resume))
+            except Exception as e:
+                print(f"[MetaLogger] failed to initialize TensorboardLogger, skipping: {e}")
 
     def update_config(self, config: dict):
         """Add a new or update an existing experiment configuration to the logger.
@@ -134,6 +141,23 @@ class MetaLogger(object):
         """
         self.local_logger.load_checkpoint(checkpoint)
 
+    def log_images(self, tag: str, image, step: int):
+        """Forward an image to any plugin logger that supports it."""
+        for logger in self.loggers:
+            if hasattr(logger, "log_images"):
+                logger.log_images(tag, image, step)
+
+    def close(self):
+        """Close any plugin loggers that support it. Idempotent."""
+        for logger in self.loggers:
+            if hasattr(logger, "close"):
+                try:
+                    logger.close()
+                except Exception as e:
+                    print(f"[MetaLogger] close failed for {type(logger).__name__}: {e}")
+        # Drop references so a second close() is a no-op.
+        self.loggers = []
+
     def _is_logger_enabled(self, env_var):
         env_var_result = str(os.getenv(env_var, "0"))
         if env_var_result in ("0", "False", "false"):
@@ -142,6 +166,18 @@ class MetaLogger(object):
             return True
         else:
             raise RuntimeError("nnU-Net logger environment variable has the wrong value. Must be '0' (disabled) or '1'(enabled).")
+
+    def _is_logger_disabled(self, env_var):
+        env_var_result = str(os.getenv(env_var, "0"))
+        if env_var_result in ("0", "False", "false"):
+            return False
+        elif env_var_result in ("1", "True", "true"):
+            return True
+        else:
+            raise RuntimeError(
+                "nnU-Net logger environment variable has the wrong value. "
+                "Must be '0' (not disabled / run) or '1' (disabled / skip)."
+            )
 
 
 class LocalLogger:
