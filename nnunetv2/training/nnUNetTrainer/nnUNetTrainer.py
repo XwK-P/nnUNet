@@ -58,6 +58,7 @@ from nnunetv2.training.data_augmentation.compute_initial_patch_size import get_p
 from nnunetv2.training.dataloading.nnunet_dataset import infer_dataset_class
 from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.logging.nnunet_logger import MetaLogger
+from nnunetv2.training.logging.tensorboard_image_utils import render_sample
 from nnunetv2.training.loss.compound_losses import DC_and_CE_loss, DC_and_BCE_loss
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 from nnunetv2.training.loss.dice import get_tp_fp_fn_tn, MemoryEfficientSoftDiceLoss
@@ -179,7 +180,7 @@ class nnUNetTrainer(object):
         self.log_file = join(self.output_folder, "training_log_%d_%d_%d_%02.0d_%02.0d_%02.0d.txt" %
                              (timestamp.year, timestamp.month, timestamp.day, timestamp.hour, timestamp.minute,
                               timestamp.second))
-        self.logger = MetaLogger(self.output_folder, continue_training)
+        self.logger = MetaLogger(self.output_folder, continue_training, local_rank=self.local_rank)
         self.logger.update_config(logger_config)
 
         ### placeholders
@@ -1162,6 +1163,106 @@ class nnUNetTrainer(object):
         self.logger.log('mean_fg_dice', mean_fg_dice, self.current_epoch)
         self.logger.log('dice_per_class_or_region', global_dc_per_class, self.current_epoch)
         self.logger.log('val_losses', loss_here, self.current_epoch)
+        self._maybe_log_validation_images()
+
+    def _maybe_log_validation_images(self):
+        """Periodically log a small batch of validation samples to TB-style loggers."""
+        if self.local_rank != 0:
+            return
+        # Skip the forward+render entirely if no plugin will consume the image (e.g., TB
+        # disabled via nnUNet_tensorboard_disabled). Otherwise we'd waste a val batch and
+        # an inference pass every cadence even though log_images is a no-op.
+        if not self.logger.has_image_logger():
+            return
+        every_n = self._parse_int_env("nnUNet_tb_image_every_n_epochs", default=50, minimum=0)
+        if every_n == 0:
+            return
+        if self.current_epoch % every_n != 0:
+            return
+        num_samples = self._parse_int_env("nnUNet_tb_image_num_samples", default=4, minimum=1)
+        # Use the unwrapped module so the rank-0-only forward doesn't deadlock waiting for
+        # other ranks on DDP's buffer broadcast / hooks (mirrors save_checkpoint at line ~1297).
+        network = self.network.module if self.is_ddp else self.network
+        try:
+            network.eval()
+            autocast_ctx = autocast(self.device.type, enabled=True) if self.device.type == 'cuda' else dummy_context()
+            with torch.no_grad(), autocast_ctx:
+                batch = next(self.dataloader_val)
+                data = batch['data'][:num_samples].to(self.device, non_blocking=True)
+                # When deep supervision is on, both target and output are lists with index 0 = highest resolution.
+                target = batch['target'][0] if isinstance(batch['target'], list) else batch['target']
+                target = target[:num_samples]
+                output = network(data)
+                output = output[0] if isinstance(output, (list, tuple)) else output
+                pred_lm = self._tb_predictions_to_label_map(output)
+                target_lm = self._tb_target_to_label_map(target, data.ndim)
+                data_np = data.cpu().numpy()
+                pred_np = pred_lm.cpu().numpy()
+                target_np = target_lm.detach().cpu().numpy() if hasattr(target_lm, 'detach') else np.asarray(target_lm)
+            n = min(num_samples, data_np.shape[0])
+            for i in range(n):
+                img = render_sample(data_np[i], target_np[i], pred_np[i])
+                self.logger.log_images(f"val_samples/sample_{i}", img, self.current_epoch)
+        except Exception as e:
+            self.print_to_log_file(f"[TB image logging] skipped this epoch: {e}")
+        finally:
+            network.train()
+
+    def _tb_predictions_to_label_map(self, output):
+        """Convert network logits to a per-voxel label map for image logging.
+
+        For region-based configs, regions are sigmoid-thresholded per channel (mirroring
+        ``validation_step``); the rendered label is the highest-index region active at the
+        voxel (1-indexed), or 0 if none. Argmax on raw logits would be wrong for regions.
+        """
+        if self.label_manager.has_regions:
+            one_hot = (torch.sigmoid(output) > 0.5).long()
+            return self._onehot_to_highest_active_label(one_hot)
+        return output.argmax(1)
+
+    def _tb_target_to_label_map(self, target, data_ndim):
+        """Convert a target tensor to a per-voxel label map for image logging.
+
+        Region-based targets arrive as one-hot multi-channel tensors with the same ndim as
+        ``data``; non-region targets arrive as label maps with one fewer dim. For region
+        targets we mirror ``_tb_predictions_to_label_map``'s encoding so the GT and pred
+        panels use the same color scheme.
+        """
+        if self.label_manager.has_regions and target.ndim == data_ndim:
+            if target.dtype == torch.bool:
+                one_hot = target.long()
+            else:
+                one_hot = (target > 0.5).long()
+            return self._onehot_to_highest_active_label(one_hot)
+        return target
+
+    @staticmethod
+    def _onehot_to_highest_active_label(one_hot: 'torch.Tensor') -> 'torch.Tensor':
+        """Encode a (B, C, ...) one-hot tensor as a per-voxel label map.
+
+        Returns 0 for voxels where no channel is active and the highest-index active channel
+        (1-indexed) elsewhere. Used for visualizing region-based predictions where regions
+        may overlap and a single colormap label per voxel is needed.
+        """
+        n = one_hot.shape[1]
+        view_shape = [1, n] + [1] * (one_hot.ndim - 2)
+        labels = torch.arange(1, n + 1, device=one_hot.device).view(*view_shape)
+        return (one_hot * labels).amax(dim=1)
+
+    @staticmethod
+    def _parse_int_env(name: str, default: int, minimum: int = 0) -> int:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            print(f"[nnUNetTrainer] env {name}={raw!r} is not an int, using default {default}")
+            return default
+        if value < minimum:
+            print(f"[nnUNetTrainer] env {name}={value} below minimum {minimum}, using default {default}")
+            return default
+        return value
 
     def on_epoch_start(self):
         self.logger.log('epoch_start_timestamps', time(), self.current_epoch)
@@ -1413,6 +1514,14 @@ class nnUNetTrainer(object):
 
         self.set_deep_supervision_enabled(True)
         compute_gaussian.cache_clear()
+
+        # Close TB/wandb plugin loggers AFTER final_val/* summaries are logged above.
+        # Closing earlier (e.g., in on_train_end) would empty MetaLogger.loggers and silently
+        # drop the post-training validation summaries.
+        try:
+            self.logger.close()
+        except Exception as e:
+            self.print_to_log_file(f"[MetaLogger] close raised, ignoring: {e}")
 
     def run_training(self):
         self.on_train_start()
