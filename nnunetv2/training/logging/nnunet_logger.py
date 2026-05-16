@@ -150,6 +150,14 @@ class MetaLogger(object):
             if hasattr(logger, "log_images"):
                 logger.log_images(tag, image, step)
 
+    def has_image_logger(self) -> bool:
+        """True if any registered plugin logger accepts image samples.
+
+        Used by the trainer to skip the validation forward pass + render entirely when no
+        plugin will consume the result (e.g., TB disabled and no other image-capable logger).
+        """
+        return any(hasattr(logger, "log_images") for logger in self.loggers)
+
     def close(self):
         """Close any plugin loggers that support it. Idempotent."""
         for logger in self.loggers:

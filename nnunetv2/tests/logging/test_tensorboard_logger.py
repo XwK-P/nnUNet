@@ -210,3 +210,30 @@ def test_metalogger_close_is_safe_to_call_twice(tmp_path):
     ml = MetaLogger(str(tmp_path), resume=False, local_rank=0)
     ml.close()
     ml.close()  # must not raise
+
+
+def test_metalogger_has_image_logger_true_when_tb_registered(tmp_path, monkeypatch):
+    monkeypatch.delenv("nnUNet_tensorboard_disabled", raising=False)
+    ml = MetaLogger(str(tmp_path), resume=False, local_rank=0)
+    try:
+        assert ml.has_image_logger() is True
+    finally:
+        ml.close()
+
+
+def test_metalogger_has_image_logger_false_when_tb_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("nnUNet_tensorboard_disabled", "1")
+    ml = MetaLogger(str(tmp_path), resume=False, local_rank=0)
+    try:
+        assert ml.has_image_logger() is False
+    finally:
+        ml.close()
+
+
+def test_metalogger_has_image_logger_false_on_nonzero_rank(tmp_path, monkeypatch):
+    monkeypatch.delenv("nnUNet_tensorboard_disabled", raising=False)
+    ml = MetaLogger(str(tmp_path), resume=False, local_rank=1)
+    try:
+        assert ml.has_image_logger() is False
+    finally:
+        ml.close()

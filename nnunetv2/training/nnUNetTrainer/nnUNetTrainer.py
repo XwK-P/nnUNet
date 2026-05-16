@@ -1169,6 +1169,11 @@ class nnUNetTrainer(object):
         """Periodically log a small batch of validation samples to TB-style loggers."""
         if self.local_rank != 0:
             return
+        # Skip the forward+render entirely if no plugin will consume the image (e.g., TB
+        # disabled via nnUNet_tensorboard_disabled). Otherwise we'd waste a val batch and
+        # an inference pass every cadence even though log_images is a no-op.
+        if not self.logger.has_image_logger():
+            return
         every_n = self._parse_int_env("nnUNet_tb_image_every_n_epochs", default=50, minimum=0)
         if every_n == 0:
             return
