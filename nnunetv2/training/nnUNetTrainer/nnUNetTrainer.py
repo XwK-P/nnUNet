@@ -1005,10 +1005,6 @@ class nnUNetTrainer(object):
             sys.stdout = old_stdout
 
         empty_cache(self.device)
-        try:
-            self.logger.close()
-        except Exception as e:
-            self.print_to_log_file(f"[MetaLogger] close raised, ignoring: {e}")
         self.print_to_log_file("Training done.")
 
     def on_train_epoch_start(self):
@@ -1190,17 +1186,60 @@ class nnUNetTrainer(object):
                 target = target[:num_samples]
                 output = self.network(data)
                 output = output[0] if isinstance(output, (list, tuple)) else output
-                pred_seg = output.argmax(1).cpu().numpy()
+                pred_lm = self._tb_predictions_to_label_map(output)
+                target_lm = self._tb_target_to_label_map(target, data.ndim)
                 data_np = data.cpu().numpy()
-                target_np = target.detach().cpu().numpy() if hasattr(target, 'detach') else np.asarray(target)
+                pred_np = pred_lm.cpu().numpy()
+                target_np = target_lm.detach().cpu().numpy() if hasattr(target_lm, 'detach') else np.asarray(target_lm)
             n = min(num_samples, data_np.shape[0])
             for i in range(n):
-                img = render_sample(data_np[i], target_np[i], pred_seg[i])
+                img = render_sample(data_np[i], target_np[i], pred_np[i])
                 self.logger.log_images(f"val_samples/sample_{i}", img, self.current_epoch)
         except Exception as e:
             self.print_to_log_file(f"[TB image logging] skipped this epoch: {e}")
         finally:
             self.network.train()
+
+    def _tb_predictions_to_label_map(self, output):
+        """Convert network logits to a per-voxel label map for image logging.
+
+        For region-based configs, regions are sigmoid-thresholded per channel (mirroring
+        ``validation_step``); the rendered label is the highest-index region active at the
+        voxel (1-indexed), or 0 if none. Argmax on raw logits would be wrong for regions.
+        """
+        if self.label_manager.has_regions:
+            one_hot = (torch.sigmoid(output) > 0.5).long()
+            return self._onehot_to_highest_active_label(one_hot)
+        return output.argmax(1)
+
+    def _tb_target_to_label_map(self, target, data_ndim):
+        """Convert a target tensor to a per-voxel label map for image logging.
+
+        Region-based targets arrive as one-hot multi-channel tensors with the same ndim as
+        ``data``; non-region targets arrive as label maps with one fewer dim. For region
+        targets we mirror ``_tb_predictions_to_label_map``'s encoding so the GT and pred
+        panels use the same color scheme.
+        """
+        if self.label_manager.has_regions and target.ndim == data_ndim:
+            if target.dtype == torch.bool:
+                one_hot = target.long()
+            else:
+                one_hot = (target > 0.5).long()
+            return self._onehot_to_highest_active_label(one_hot)
+        return target
+
+    @staticmethod
+    def _onehot_to_highest_active_label(one_hot: 'torch.Tensor') -> 'torch.Tensor':
+        """Encode a (B, C, ...) one-hot tensor as a per-voxel label map.
+
+        Returns 0 for voxels where no channel is active and the highest-index active channel
+        (1-indexed) elsewhere. Used for visualizing region-based predictions where regions
+        may overlap and a single colormap label per voxel is needed.
+        """
+        n = one_hot.shape[1]
+        view_shape = [1, n] + [1] * (one_hot.ndim - 2)
+        labels = torch.arange(1, n + 1, device=one_hot.device).view(*view_shape)
+        return (one_hot * labels).amax(dim=1)
 
     @staticmethod
     def _parse_int_env(name: str, default: int, minimum: int = 0) -> int:
@@ -1467,6 +1506,14 @@ class nnUNetTrainer(object):
 
         self.set_deep_supervision_enabled(True)
         compute_gaussian.cache_clear()
+
+        # Close TB/wandb plugin loggers AFTER final_val/* summaries are logged above.
+        # Closing earlier (e.g., in on_train_end) would empty MetaLogger.loggers and silently
+        # drop the post-training validation summaries.
+        try:
+            self.logger.close()
+        except Exception as e:
+            self.print_to_log_file(f"[MetaLogger] close raised, ignoring: {e}")
 
     def run_training(self):
         self.on_train_start()
