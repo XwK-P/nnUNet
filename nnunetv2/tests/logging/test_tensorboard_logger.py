@@ -69,6 +69,28 @@ def test_resume_archives_existing_logdir_when_not_resuming(tmp_path):
     assert len(new_events) >= 1
 
 
+def test_validation_only_reload_does_not_archive(tmp_path):
+    """When checkpoint_final.pth exists (e.g., --val rerun), preserve the existing logdir."""
+    # Simulate a completed training: write events, then drop a checkpoint_final.pth.
+    logger = TensorboardLogger(str(tmp_path), resume=False)
+    logger.log("loss", 1.0, 0)
+    logger.close()
+    (tmp_path / "checkpoint_final.pth").write_bytes(b"fake checkpoint")
+
+    # nnUNetv2_train ... --val constructs the trainer with continue_training=False,
+    # so MetaLogger passes resume=False to TensorboardLogger.
+    logger2 = TensorboardLogger(str(tmp_path), resume=False)
+    logger2.log("final_val/foreground_dice", 0.9, 0)
+    logger2.close()
+
+    # No archive should have been created; events accumulate in the same dir.
+    assert not list((tmp_path / "tensorboard").glob("old_*")), \
+        "should not archive when training already completed (checkpoint_final.pth present)"
+    ea = _read_events(tmp_path / "tensorboard")
+    assert "loss" in ea.Tags()["scalars"], "original training events must be preserved"
+    assert "final_val/foreground_dice" in ea.Tags()["scalars"], "re-validation events must be appended"
+
+
 def test_resume_appends_to_same_logdir(tmp_path):
     logger = TensorboardLogger(str(tmp_path), resume=False)
     logger.log("loss", 1.0, 0)

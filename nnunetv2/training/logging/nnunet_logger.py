@@ -392,7 +392,15 @@ class TensorboardLogger:
             self.logdir = self.output_folder / "tensorboard"
 
         # If not resuming and a previous logdir exists, archive (don't delete) it.
-        if not self.resume and self.logdir.exists() and any(self.logdir.iterdir()):
+        # Exception: skip archival when checkpoint_final.pth exists in output_folder. That
+        # means training already completed; this constructor is being called for something
+        # like `nnUNetv2_train --val` (re-validation), which uses continue_training=False
+        # but should preserve the existing TB timeline instead of moving it under old_*.
+        training_already_complete = (self.output_folder / "checkpoint_final.pth").exists()
+        if (not self.resume
+                and not training_already_complete
+                and self.logdir.exists()
+                and any(self.logdir.iterdir())):
             archive_name = f"old_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
             archive_path = self.logdir / archive_name
             archive_path.mkdir(parents=True, exist_ok=True)
