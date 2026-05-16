@@ -1180,8 +1180,11 @@ class nnUNetTrainer(object):
         if self.current_epoch % every_n != 0:
             return
         num_samples = self._parse_int_env("nnUNet_tb_image_num_samples", default=4, minimum=1)
+        # Use the unwrapped module so the rank-0-only forward doesn't deadlock waiting for
+        # other ranks on DDP's buffer broadcast / hooks (mirrors save_checkpoint at line ~1297).
+        network = self.network.module if self.is_ddp else self.network
         try:
-            self.network.eval()
+            network.eval()
             autocast_ctx = autocast(self.device.type, enabled=True) if self.device.type == 'cuda' else dummy_context()
             with torch.no_grad(), autocast_ctx:
                 batch = next(self.dataloader_val)
@@ -1189,7 +1192,7 @@ class nnUNetTrainer(object):
                 # When deep supervision is on, both target and output are lists with index 0 = highest resolution.
                 target = batch['target'][0] if isinstance(batch['target'], list) else batch['target']
                 target = target[:num_samples]
-                output = self.network(data)
+                output = network(data)
                 output = output[0] if isinstance(output, (list, tuple)) else output
                 pred_lm = self._tb_predictions_to_label_map(output)
                 target_lm = self._tb_target_to_label_map(target, data.ndim)
@@ -1203,7 +1206,7 @@ class nnUNetTrainer(object):
         except Exception as e:
             self.print_to_log_file(f"[TB image logging] skipped this epoch: {e}")
         finally:
-            self.network.train()
+            network.train()
 
     def _tb_predictions_to_label_map(self, output):
         """Convert network logits to a per-voxel label map for image logging.
