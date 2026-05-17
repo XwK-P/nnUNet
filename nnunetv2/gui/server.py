@@ -27,6 +27,8 @@ def create_app(cfg: GuiConfig) -> FastAPI:
 
     app.include_router(system_router.make_router())
 
+    is_loopback = cfg.host in ("127.0.0.1", "localhost", "::1")
+
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
         log.error("unhandled in %s: %s\n%s", request.url.path, exc, traceback.format_exc())
@@ -34,7 +36,7 @@ def create_app(cfg: GuiConfig) -> FastAPI:
             status_code=500,
             content={
                 "kind": "internal_error",
-                "message": str(exc),
+                "message": str(exc) if is_loopback else "Internal server error",
                 "retryable": False,
                 "details": None,
             },
