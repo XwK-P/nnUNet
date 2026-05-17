@@ -22,6 +22,8 @@ def test_from_env_resolves_paths(monkeypatch, tmp_path):
 
 def test_cli_overrides_take_priority(monkeypatch, tmp_path):
     monkeypatch.setenv("nnUNet_raw", str(tmp_path / "env_raw"))
+    monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
+    monkeypatch.setenv("nnUNet_results", str(tmp_path / "res"))
     override = tmp_path / "cli_raw"
 
     cfg = GuiConfig.from_env_and_args(
@@ -30,6 +32,8 @@ def test_cli_overrides_take_priority(monkeypatch, tmp_path):
     )
 
     assert cfg.raw == override
+    assert cfg.preprocessed == tmp_path / "pre"
+    assert cfg.results == tmp_path / "res"
 
 
 def test_non_loopback_requires_token(monkeypatch, tmp_path):
@@ -67,5 +71,10 @@ def test_missing_required_env_raises(monkeypatch):
     monkeypatch.delenv("nnUNet_preprocessed", raising=False)
     monkeypatch.delenv("nnUNet_results", raising=False)
 
-    with pytest.raises(EnvironmentError, match="nnUNet_results"):
+    with pytest.raises(EnvironmentError) as exc_info:
         GuiConfig.from_env_and_args(host="127.0.0.1", port=0, token=None)
+
+    msg = str(exc_info.value)
+    assert "nnUNet_raw" in msg
+    assert "nnUNet_preprocessed" in msg
+    assert "nnUNet_results" in msg
