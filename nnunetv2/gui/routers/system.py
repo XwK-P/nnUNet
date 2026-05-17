@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import platform
 import sys
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
 from fastapi import APIRouter, Request
 
@@ -19,9 +20,8 @@ def make_router() -> APIRouter:
     @router.get("/version")
     def version() -> dict:
         try:
-            from importlib.metadata import version as _v
-            nnunet_version = _v("nnunetv2")
-        except Exception:
+            nnunet_version = _pkg_version("nnunetv2")
+        except PackageNotFoundError:
             nnunet_version = "unknown"
         return {"nnunetv2": nnunet_version, "gui": GUI_VERSION}
 
