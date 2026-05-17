@@ -3,6 +3,10 @@ from __future__ import annotations
 import argparse
 import webbrowser
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 from nnunetv2.gui.config import GuiConfig
 from nnunetv2.gui.server import create_app
