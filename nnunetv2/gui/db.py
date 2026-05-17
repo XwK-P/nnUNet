@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import sqlite3
 from contextlib import contextmanager
 from typing import Iterator
 
 from sqlalchemy import MetaData, Table, Column, String, event, create_engine
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from nnunetv2.gui.config import GuiConfig
 
@@ -22,7 +23,11 @@ settings_table = Table(
 
 
 @event.listens_for(Engine, "connect")
-def _enable_wal(dbapi_connection, _record):
+def _enable_wal(dbapi_connection, connection_record):
+    # Guard: this listener fires for every SQLAlchemy engine in the process.
+    # Only apply SQLite PRAGMAs when the underlying DB-API connection is sqlite3.
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA foreign_keys=ON")
@@ -32,7 +37,6 @@ def _enable_wal(dbapi_connection, _record):
 def _engine_for(cfg: GuiConfig) -> Engine:
     return create_engine(
         f"sqlite:///{cfg.state_db}",
-        future=True,
         connect_args={"check_same_thread": False},
     )
 
@@ -47,8 +51,7 @@ def init_db(cfg: GuiConfig) -> None:
 @contextmanager
 def session_scope(cfg: GuiConfig) -> Iterator[Session]:
     engine = _engine_for(cfg)
-    Maker = sessionmaker(engine, future=True, expire_on_commit=False)
-    session = Maker()
+    session = Session(engine, expire_on_commit=False)
     try:
         yield session
         session.commit()

@@ -59,3 +59,22 @@ def test_init_db_is_idempotent(gui_config):
         n = s.execute(text("SELECT count(*) FROM settings")).first()[0]
 
     assert n == 0
+
+
+def test_session_scope_rolls_back_on_exception(gui_config):
+    init_db(gui_config)
+
+    with session_scope(gui_config) as s:
+        s.execute(text("INSERT INTO settings(key, value) VALUES ('x', '1')"))
+
+    try:
+        with session_scope(gui_config) as s:
+            s.execute(text("INSERT INTO settings(key, value) VALUES ('y', '2')"))
+            raise RuntimeError("abort")
+    except RuntimeError:
+        pass
+
+    with session_scope(gui_config) as s:
+        keys = [r[0] for r in s.execute(text("SELECT key FROM settings")).all()]
+
+    assert keys == ["x"]
