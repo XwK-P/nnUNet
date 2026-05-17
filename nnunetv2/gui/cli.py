@@ -4,8 +4,6 @@ import argparse
 import webbrowser
 from pathlib import Path
 
-from fastapi import FastAPI
-
 from nnunetv2.gui.config import GuiConfig
 from nnunetv2.gui.server import create_app
 
@@ -50,10 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     app = _make_app_from_args(args)
     if args.open:
         url = f"http://{args.host}:{args.port}"
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
+        webbrowser.open(url)
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0

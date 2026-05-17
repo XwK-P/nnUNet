@@ -22,6 +22,19 @@ def test_parser_accepts_overrides():
     assert args.token == "hex"
 
 
+def test_parser_accepts_path_overrides(tmp_path):
+    args = build_parser().parse_args(
+        [
+            "--raw", str(tmp_path / "raw"),
+            "--preprocessed", str(tmp_path / "pre"),
+            "--results", str(tmp_path / "res"),
+        ]
+    )
+    assert args.raw == tmp_path / "raw"
+    assert args.preprocessed == tmp_path / "pre"
+    assert args.results == tmp_path / "res"
+
+
 def test_make_app_from_args_returns_a_fastapi_instance(monkeypatch, tmp_path):
     monkeypatch.setenv("nnUNet_raw", str(tmp_path / "raw"))
     monkeypatch.setenv("nnUNet_preprocessed", str(tmp_path / "pre"))
