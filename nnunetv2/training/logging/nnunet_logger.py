@@ -1,18 +1,27 @@
+import math
+import os
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
 import matplotlib
+import numpy as np
 from batchgenerators.utilities.file_and_folder_operations import join
 
 matplotlib.use('agg')
 import seaborn as sns
 import matplotlib.pyplot as plt
-from typing import Any
-from pathlib import Path
-import shutil
-import os
 
 try:
     import wandb
 except ImportError:
     wandb = None
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    SummaryWriter = None
 
 
 def get_cluster_job_id():
@@ -31,20 +40,27 @@ class MetaLogger(object):
     plotting progress, and checkpointing.
     """
 
-    def __init__(self, output_folder, resume, verbose: bool = False):
+    def __init__(self, output_folder, resume, verbose: bool = False, local_rank: int = 0):
         """Initialize the meta logger.
 
         Args:
             output_folder: The output folder.
             resume: Whether to resume training if possible.
             verbose: Whether to enable verbose logging in the local logger.
+            local_rank: DDP local rank. Plugin loggers (W&B, TB) only run on rank 0.
         """
         self.output_folder = output_folder
         self.resume = resume
+        self.local_rank = local_rank
         self.loggers = []
         self.local_logger = LocalLogger(verbose)
-        if self._is_logger_enabled("nnUNet_wandb_enabled"):
+        if local_rank == 0 and self._is_logger_enabled("nnUNet_wandb_enabled"):
             self.loggers.append(WandbLogger(output_folder, resume))
+        if local_rank == 0 and not self._is_logger_disabled("nnUNet_tensorboard_disabled"):
+            try:
+                self.loggers.append(TensorboardLogger(output_folder, resume))
+            except Exception as e:
+                print(f"[MetaLogger] failed to initialize TensorboardLogger, skipping: {e}")
 
     def update_config(self, config: dict):
         """Add a new or update an existing experiment configuration to the logger.
@@ -125,6 +141,34 @@ class MetaLogger(object):
         """
         self.local_logger.load_checkpoint(checkpoint)
 
+    def log_images(self, tag: str, image, step: int):
+        """Forward an image to any plugin logger that supports it.
+
+        Images are plugin-only; LocalLogger only stores per-epoch scalars and is skipped.
+        """
+        for logger in self.loggers:
+            if hasattr(logger, "log_images"):
+                logger.log_images(tag, image, step)
+
+    def has_image_logger(self) -> bool:
+        """True if any registered plugin logger accepts image samples.
+
+        Used by the trainer to skip the validation forward pass + render entirely when no
+        plugin will consume the result (e.g., TB disabled and no other image-capable logger).
+        """
+        return any(hasattr(logger, "log_images") for logger in self.loggers)
+
+    def close(self):
+        """Close any plugin loggers that support it. Idempotent."""
+        for logger in self.loggers:
+            if hasattr(logger, "close"):
+                try:
+                    logger.close()
+                except Exception as e:
+                    print(f"[MetaLogger] close failed for {type(logger).__name__}: {e}")
+        # Drop references so a second close() is a no-op.
+        self.loggers = []
+
     def _is_logger_enabled(self, env_var):
         env_var_result = str(os.getenv(env_var, "0"))
         if env_var_result in ("0", "False", "false"):
@@ -133,6 +177,18 @@ class MetaLogger(object):
             return True
         else:
             raise RuntimeError("nnU-Net logger environment variable has the wrong value. Must be '0' (disabled) or '1'(enabled).")
+
+    def _is_logger_disabled(self, env_var):
+        env_var_result = str(os.getenv(env_var, "0"))
+        if env_var_result in ("0", "False", "false"):
+            return False
+        elif env_var_result in ("1", "True", "true"):
+            return True
+        else:
+            raise RuntimeError(
+                "nnU-Net logger environment variable has the wrong value. "
+                "Must be '0' (not disabled / run) or '1' (disabled / skip)."
+            )
 
 
 class LocalLogger:
@@ -301,3 +357,139 @@ class WandbLogger:
             value: Summary value to store.
         """
         self.run.summary[key] = value
+
+
+class TensorboardLogger:
+    """TensorBoard logger for nnU-Net training runs.
+
+    Default logdir: ``<output_folder>/tensorboard/``.
+    Override with env var ``nnUNet_tb_logdir`` for centralized aggregation;
+    when set, runs go to ``<value>/<basename(output_folder)>__<timestamp>/``.
+
+    Any exception during logging self-disables the logger for the rest of
+    the run; training is never interrupted by TB failures.
+    """
+
+    def __init__(self, output_folder, resume):
+        if SummaryWriter is None:
+            raise RuntimeError(
+                "tensorboard is not installed. Install it with `pip install tensorboard`."
+            )
+
+        self.output_folder = Path(output_folder)
+        self.resume = resume
+        self._disabled = False
+        self._hparams: dict = {}
+        self._summary_metrics: dict = {}
+
+        override = os.getenv("nnUNet_tb_logdir")
+        if override:
+            # Microsecond precision avoids collisions when two runs start in the same second
+            # (DDP startup, array jobs sharing nnUNet_tb_logdir, fast test re-runs).
+            run_name = f"{self.output_folder.name}__{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+            self.logdir = Path(override) / run_name
+        else:
+            self.logdir = self.output_folder / "tensorboard"
+
+        # If not resuming and a previous logdir exists, archive (don't delete) it.
+        # Exception: skip archival when checkpoint_final.pth exists in output_folder. That
+        # means training already completed; this constructor is being called for something
+        # like `nnUNetv2_train --val` (re-validation), which uses continue_training=False
+        # but should preserve the existing TB timeline instead of moving it under old_*.
+        training_already_complete = (self.output_folder / "checkpoint_final.pth").exists()
+        if (not self.resume
+                and not training_already_complete
+                and self.logdir.exists()
+                and any(self.logdir.iterdir())):
+            archive_name = f"old_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+            archive_path = self.logdir / archive_name
+            archive_path.mkdir(parents=True, exist_ok=True)
+            for entry in list(self.logdir.iterdir()):
+                if entry.name.startswith("old_"):
+                    continue
+                shutil.move(str(entry), str(archive_path / entry.name))
+
+        self.logdir.mkdir(parents=True, exist_ok=True)
+        self.writer = SummaryWriter(log_dir=str(self.logdir))
+
+    def update_config(self, config: dict):
+        if self._disabled:
+            return
+        try:
+            self._hparams.update(_flatten_for_hparams(config))
+        except Exception as e:
+            self._fail(f"update_config failed: {e}")
+
+    def log(self, key: str, value, step: int):
+        if self._disabled:
+            return
+        try:
+            self.writer.add_scalar(key, float(value), step)
+        except Exception as e:
+            self._fail(f"log scalar {key} failed: {e}")
+
+    def log_summary(self, key: str, value):
+        if self._disabled:
+            return
+        try:
+            numeric = float(value)
+            self.writer.add_scalar(f"summary/{key}", numeric)
+            # Only pair finite metrics with hparams; NaN/Inf would corrupt the TB hparams view.
+            # If a non-finite value arrives after a finite one for the same key, the prior
+            # finite value is preserved (last-valid-wins).
+            if math.isfinite(numeric):
+                self._summary_metrics[key] = numeric
+        except (TypeError, ValueError):
+            try:
+                self.writer.add_text(f"summary/{key}", str(value))
+            except Exception as e:
+                self._fail(f"log_summary text {key} failed: {e}")
+        except Exception as e:
+            self._fail(f"log_summary {key} failed: {e}")
+
+    def log_images(self, tag: str, image_chw, step: int):
+        if self._disabled:
+            return
+        try:
+            self.writer.add_image(tag, image_chw, step, dataformats="CHW")
+        except Exception as e:
+            self._fail(f"log_images {tag} failed: {e}")
+
+    def close(self):
+        if self._disabled:
+            try:
+                self.writer.close()
+            except Exception:
+                pass
+            return
+        try:
+            if self._hparams and self._summary_metrics:
+                self.writer.add_hparams(self._hparams, self._summary_metrics)
+            self.writer.flush()
+            self.writer.close()
+        except Exception as e:
+            self._fail(f"close failed: {e}")
+
+    def _fail(self, message: str):
+        print(f"[TensorboardLogger] {message}; disabling for rest of run")
+        self._disabled = True
+
+
+def _flatten_for_hparams(config: dict, prefix: str = "") -> dict:
+    """Flatten nested dicts to dotted keys; coerce values to TB-compatible scalars."""
+    flat: dict = {}
+    for k, v in config.items():
+        key = f"{prefix}.{k}" if prefix else str(k)
+        if isinstance(v, dict):
+            flat.update(_flatten_for_hparams(v, key))
+        elif isinstance(v, np.generic):
+            # numpy scalars (e.g., np.int64 patch sizes from plans dict) -> native Python so
+            # TB treats them as numeric axes in the hparams view, not categorical strings.
+            flat[key] = v.item()
+        elif isinstance(v, (int, float, str, bool)):
+            flat[key] = v
+        elif v is None:
+            flat[key] = "None"
+        else:
+            flat[key] = repr(v)
+    return flat
