@@ -1,14 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { endpoints, ApiError } from '../lib/api';
-  import type { Dataset } from '../lib/types';
+  import type { Case, Dataset } from '../lib/types';
   import PlansViewer from './PlansViewer.svelte';
   import FingerprintViewer from './FingerprintViewer.svelte';
+  import CasesList from './CasesList.svelte';
+  import CaseViewer from './CaseViewer.svelte';
 
   let { datasetId }: { datasetId: string } = $props();
 
   type Tab = 'cases' | 'plans' | 'fingerprint' | 'validation';
   let tab = $state<Tab>('cases');
+  let selectedCase = $state<Case | null>(null);
 
   let s = $state<
     | { kind: 'idle' }
@@ -67,7 +70,18 @@
     </div>
 
     {#if tab === 'cases'}
-      <p class="text-sm text-slate-400">Case browser + NiiVue viewer land in Phase 2.</p>
+      <div class="flex gap-3">
+        <div class="w-56 flex-shrink-0">
+          <CasesList datasetId={s.data.id} selectedId={selectedCase?.id ?? null} onSelect={(c) => (selectedCase = c)} />
+        </div>
+        <div class="flex-1 min-w-0">
+          {#if selectedCase}
+            <CaseViewer datasetId={s.data.id} case={selectedCase} />
+          {:else}
+            <p class="text-sm text-slate-400">Pick a case on the left.</p>
+          {/if}
+        </div>
+      </div>
     {:else if tab === 'plans'}
       <PlansViewer datasetId={s.data.id} />
     {:else if tab === 'fingerprint'}
