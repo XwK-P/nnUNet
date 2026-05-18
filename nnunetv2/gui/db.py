@@ -57,6 +57,26 @@ run_table = Table(
 )
 
 
+job_table = Table(
+    "job",
+    _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("kind", String, nullable=False),
+    Column("args_json", String, nullable=False),
+    Column("pid", Integer, nullable=True),
+    Column("pgid", Integer, nullable=True),
+    Column("status", String, nullable=False),
+    Column("started_at", DateTime, nullable=True),
+    Column("ended_at", DateTime, nullable=True),
+    Column("exit_code", Integer, nullable=True),
+    Column("log_path", String, nullable=True),
+    Column("output_run_id", String, nullable=True),
+    Column("created_by", String, nullable=True),
+    Column("error_message", String, nullable=True),
+    Index("ix_job_status", "status"),
+)
+
+
 @event.listens_for(Engine, "connect")
 def _enable_wal(dbapi_connection, connection_record):
     # Guard: this listener fires for every SQLAlchemy engine in the process.
