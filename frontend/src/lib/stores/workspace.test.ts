@@ -41,4 +41,24 @@ describe('workspace store', () => {
     ws.set('should-not-be-recorded');
     expect(calls).toEqual([null, 'Dataset027_ACDC', null]);
   });
+
+  it('propagates updates across independent factory calls', () => {
+    // Mimics the real layout: WorkspaceSwitcher in the header and a route
+    // component both call createWorkspaceStore() in their own scripts.
+    // A set() from one must reach subscribers in the other.
+    const fromHeader = createWorkspaceStore();
+    const fromRoute = createWorkspaceStore();
+
+    const routeCalls: (string | null)[] = [];
+    const unsub = fromRoute.subscribe((v) => routeCalls.push(v));
+
+    fromHeader.set('Dataset027_ACDC');
+    expect(fromRoute.get()).toBe('Dataset027_ACDC');
+    expect(routeCalls).toEqual([null, 'Dataset027_ACDC']);
+
+    fromHeader.clear();
+    expect(routeCalls).toEqual([null, 'Dataset027_ACDC', null]);
+
+    unsub();
+  });
 });

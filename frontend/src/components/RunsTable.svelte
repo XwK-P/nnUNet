@@ -12,10 +12,10 @@
   let sortBy = $state<SortKey>('last_seen_at');
   let sortDir = $state<'asc' | 'desc'>('desc');
 
-  onMount(() => {
-    const unsub = runs.subscribe((s) => (result = s));
+  onMount(() => runs.subscribe((s) => (result = s)));
+
+  $effect(() => {
     runs.load(filter);
-    return unsub;
   });
 
   function sorted(data: Run[]): Run[] {

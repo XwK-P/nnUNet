@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { endpoints, ApiError } from '../lib/api';
 
   let { datasetId }: { datasetId: string } = $props();
@@ -11,7 +10,7 @@
     | { kind: 'error'; error: ApiError | Error }
   >({ kind: 'idle' });
 
-  onMount(() => {
+  $effect(() => {
     state = { kind: 'loading' };
     endpoints
       .getDatasetFingerprint(datasetId)
