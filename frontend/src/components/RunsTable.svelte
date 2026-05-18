@@ -3,7 +3,7 @@
   import { createRunsStore } from '../lib/stores/runs';
   import type { Run, RunFilter } from '../lib/types';
 
-  let { filter = {} as RunFilter }: { filter?: RunFilter } = $props();
+  let { filter = {} as RunFilter, onSelect }: { filter?: RunFilter; onSelect?: (r: Run) => void } = $props();
 
   const runs = createRunsStore();
   let result = $state(runs.get());
@@ -64,7 +64,7 @@
     </thead>
     <tbody>
       {#each sorted(result.data) as r}
-        <tr class="border-b border-border-soft">
+        <tr class="border-b border-border-soft cursor-pointer hover:bg-bg-panel" onclick={() => onSelect?.(r)}>
           <td class="py-1 px-2 text-slate-300">{r.dataset_id}</td>
           <td class="py-1 px-2 text-slate-300">{r.configuration}</td>
           <td class="py-1 px-2 text-slate-400">{r.trainer_name}</td>
