@@ -66,3 +66,57 @@ def test_read_fingerprint_missing_returns_none(tmp_path):
     from nnunetv2.gui.state.discovery import read_fingerprint
     (tmp_path / "no_fp").mkdir()
     assert read_fingerprint(tmp_path / "no_fp") is None
+
+
+def test_scan_results_finds_runs(populated_paths):
+    from nnunetv2.gui.state.discovery import scan_results_runs
+    runs = scan_results_runs(populated_paths["results"])
+    assert len(runs) == 2
+    ids = sorted(r.id for r in runs)
+    assert ids == [
+        "Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__2d/fold_0",
+        "Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0",
+    ]
+    for r in runs:
+        assert r.dataset_id == "Dataset027_ACDC"
+        assert r.plans_name == "nnUNetPlans"
+        assert r.trainer_name == "nnUNetTrainer"
+        assert r.fold == "0"
+        assert r.status == "completed"  # checkpoint_final.pth exists
+
+
+def test_scan_results_marks_abandoned_when_no_final_checkpoint(gui_paths):
+    from nnunetv2.tests.gui.fixtures.builders import build_run
+    from nnunetv2.gui.state.discovery import scan_results_runs
+
+    build_run(gui_paths["results"], dataset_folder="Dataset099_X",
+              configuration="3d_fullres", fold="2", completed=False)
+    runs = scan_results_runs(gui_paths["results"])
+    assert len(runs) == 1
+    assert runs[0].status == "abandoned"
+
+
+def test_scan_results_handles_fold_all(gui_paths):
+    from nnunetv2.tests.gui.fixtures.builders import build_run
+    from nnunetv2.gui.state.discovery import scan_results_runs
+
+    build_run(gui_paths["results"], dataset_folder="Dataset100_Y",
+              configuration="3d_fullres", fold="all")
+    runs = scan_results_runs(gui_paths["results"])
+    assert len(runs) == 1
+    assert runs[0].fold == "all"
+
+
+def test_scan_results_skips_garbage_dirs(populated_paths):
+    from nnunetv2.gui.state.discovery import scan_results_runs
+
+    (populated_paths["results"] / "Dataset027_ACDC" / "junk_not_a_run_dir").mkdir()
+    (populated_paths["results"] / "Dataset027_ACDC" / "nnUNetPlans__nnUNetTrainer__3d_fullres" / "validation_only_no_fold.txt").touch()
+    runs = scan_results_runs(populated_paths["results"])
+    # Should still be the 2 runs from populated_paths
+    assert len(runs) == 2
+
+
+def test_scan_results_empty(gui_paths):
+    from nnunetv2.gui.state.discovery import scan_results_runs
+    assert scan_results_runs(gui_paths["results"]) == []

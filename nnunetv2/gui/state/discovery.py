@@ -9,6 +9,8 @@ from typing import Optional
 
 
 DATASET_DIR_RE = re.compile(r"^Dataset(\d{3})_(.+)$")
+RUN_DIR_RE = re.compile(r"^(.+)__(.+)__(.+)$")
+FOLD_DIR_RE = re.compile(r"^fold_(.+)$")
 
 
 @dataclass(frozen=True)
@@ -19,6 +21,18 @@ class DiscoveredDataset:
     raw_path: str
     case_count: int
     modality_count: int
+
+
+@dataclass(frozen=True)
+class DiscoveredRun:
+    id: str
+    dataset_id: str
+    plans_name: str
+    trainer_name: str
+    configuration: str
+    fold: str
+    output_folder: str
+    status: str  # 'completed' | 'abandoned'
 
 
 def scan_raw_datasets(raw_root: Path) -> list[DiscoveredDataset]:
@@ -101,3 +115,40 @@ def read_fingerprint(dataset_preprocessed_dir: Path) -> Optional[dict]:
         return json.loads(fp.read_text())
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def scan_results_runs(results_root: Path) -> list[DiscoveredRun]:
+    """Walk `results_root`, yielding one DiscoveredRun per fold_* directory."""
+    if not results_root.is_dir():
+        return []
+    out: list[DiscoveredRun] = []
+    for dataset_dir in sorted(results_root.iterdir()):
+        if not dataset_dir.is_dir() or not DATASET_DIR_RE.match(dataset_dir.name):
+            continue
+        for plans_trainer_config_dir in sorted(dataset_dir.iterdir()):
+            if not plans_trainer_config_dir.is_dir():
+                continue
+            m = RUN_DIR_RE.match(plans_trainer_config_dir.name)
+            if not m:
+                continue
+            plans_name, trainer_name, configuration = m.group(1), m.group(2), m.group(3)
+            for fold_dir in sorted(plans_trainer_config_dir.iterdir()):
+                if not fold_dir.is_dir():
+                    continue
+                fm = FOLD_DIR_RE.match(fold_dir.name)
+                if not fm:
+                    continue
+                fold = fm.group(1)
+                status = "completed" if (fold_dir / "checkpoint_final.pth").is_file() else "abandoned"
+                canonical_id = f"{dataset_dir.name}/{plans_trainer_config_dir.name}/{fold_dir.name}"
+                out.append(DiscoveredRun(
+                    id=canonical_id,
+                    dataset_id=dataset_dir.name,
+                    plans_name=plans_name,
+                    trainer_name=trainer_name,
+                    configuration=configuration,
+                    fold=fold,
+                    output_folder=str(fold_dir),
+                    status=status,
+                ))
+    return out
