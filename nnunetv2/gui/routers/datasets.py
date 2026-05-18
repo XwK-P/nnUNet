@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from nnunetv2.gui.state.cases import Case, list_cases_for_dataset
 from nnunetv2.gui.state.datasets import (
     Dataset, list_datasets, get_dataset, fingerprint_dict,
 )
@@ -53,5 +54,12 @@ def make_router() -> APIRouter:
         if fp is None:
             raise HTTPException(status_code=404, detail="No fingerprint available")
         return fp
+
+    @router.get("/{dataset_id}/cases", response_model=list[Case])
+    def get_cases(dataset_id: str, request: Request) -> list[Case]:
+        cfg = request.app.state.gui_config
+        if get_dataset(cfg, dataset_id) is None:
+            raise HTTPException(status_code=404, detail=f"Dataset {dataset_id!r} not found")
+        return list_cases_for_dataset(cfg, dataset_id)
 
     return router
