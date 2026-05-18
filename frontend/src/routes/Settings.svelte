@@ -8,6 +8,8 @@
     theme.set(t);
     current = t;
   }
+
+  const THEMES: Theme[] = ['light', 'dark', 'system'];
 </script>
 
 <h2 class="text-lg font-semibold text-slate-100">Settings</h2>
@@ -16,7 +18,7 @@
 <div class="mt-4">
   <div class="text-[11px] uppercase tracking-wider text-slate-500">Theme</div>
   <div class="flex gap-2 mt-1 text-xs">
-    {#each ['light','dark','system'] as t}
+    {#each THEMES as t}
       <button
         class="px-3 py-1 rounded border border-border-soft"
         class:bg-accent-soft={current === t}
