@@ -49,3 +49,23 @@ def client(app):
     from fastapi.testclient import TestClient
 
     return TestClient(app)
+
+
+@pytest.fixture
+def populated_paths(gui_paths):
+    """Like gui_paths, but with a small fixture tree pre-built.
+
+    Contents: one raw dataset (Dataset027_ACDC, 3 cases, single CT channel) that
+    is preprocessed and has two completed runs (3d_fullres fold_0 and 2d fold_0).
+    """
+    from nnunetv2.tests.gui.fixtures.builders import (
+        build_dataset_raw,
+        build_dataset_preprocessed,
+        build_run,
+    )
+
+    folder = build_dataset_raw(gui_paths["raw"], dataset_id=27, name="ACDC")
+    build_dataset_preprocessed(gui_paths["preprocessed"], dataset_folder=folder)
+    build_run(gui_paths["results"], dataset_folder=folder, configuration="3d_fullres", fold="0")
+    build_run(gui_paths["results"], dataset_folder=folder, configuration="2d", fold="0")
+    return gui_paths
