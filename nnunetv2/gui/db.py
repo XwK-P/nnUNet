@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import MetaData, Table, Column, String, event, create_engine
+from sqlalchemy import MetaData, Table, Column, String, Integer, DateTime, Index, event, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,41 @@ settings_table = Table(
     _metadata,
     Column("key", String, primary_key=True),
     Column("value", String, nullable=False),
+)
+
+
+dataset_table = Table(
+    "dataset",
+    _metadata,
+    Column("id", String, primary_key=True),
+    Column("dataset_id_int", Integer, nullable=True),
+    Column("name", String, nullable=True),
+    Column("raw_path", String, nullable=True),
+    Column("preprocessed_path", String, nullable=True),
+    Column("last_scanned_at", DateTime, nullable=True),
+    Column("fingerprint_json", String, nullable=True),
+    Column("case_count", Integer, nullable=True),
+    Column("modality_count", Integer, nullable=True),
+)
+
+
+run_table = Table(
+    "run",
+    _metadata,
+    Column("id", String, primary_key=True),
+    Column("dataset_id", String, nullable=False),
+    Column("plans_name", String, nullable=False),
+    Column("trainer_name", String, nullable=False),
+    Column("configuration", String, nullable=False),
+    Column("fold", String, nullable=False),
+    Column("output_folder", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("source", String, nullable=False),
+    Column("created_at", DateTime, nullable=True),
+    Column("last_seen_at", DateTime, nullable=True),
+    Column("tags_json", String, nullable=True),
+    Column("notes", String, nullable=True),
+    Index("ix_run_dataset_id", "dataset_id"),
 )
 
 
