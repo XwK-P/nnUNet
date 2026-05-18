@@ -120,3 +120,20 @@ def build_run_predictions(
         else:
             path.touch()
     return pred_dir
+
+
+def build_tb_event_dir(
+    out: Path,
+    *,
+    scalars: dict[str, list[tuple[int, float]]] | None = None,
+) -> Path:
+    """Write a minimal TensorBoard event file using torch.utils.tensorboard.SummaryWriter."""
+    from torch.utils.tensorboard import SummaryWriter
+    out.mkdir(parents=True, exist_ok=True)
+    writer = SummaryWriter(log_dir=str(out))
+    for key, points in (scalars or {}).items():
+        for step, val in points:
+            writer.add_scalar(key, val, global_step=step)
+    writer.flush()
+    writer.close()
+    return out
