@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from nnunetv2.gui.config import GuiConfig
 from nnunetv2.gui.db import init_db
 from nnunetv2.gui.routers import datasets as datasets_router
+from nnunetv2.gui.routers import runs as runs_router
 from nnunetv2.gui.routers import system as system_router
 from nnunetv2.gui.state.discovery import reconcile
 
@@ -32,6 +33,7 @@ def create_app(cfg: GuiConfig) -> FastAPI:
 
     app.include_router(system_router.make_router())
     app.include_router(datasets_router.make_router())
+    app.include_router(runs_router.make_router())
 
     is_loopback = cfg.host in ("127.0.0.1", "localhost", "::1")
 
