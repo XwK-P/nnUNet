@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import traceback
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from nnunetv2.gui.config import GuiConfig
 from nnunetv2.gui.db import init_db
@@ -28,6 +30,20 @@ def create_app(cfg: GuiConfig) -> FastAPI:
     app.include_router(system_router.make_router())
 
     is_loopback = cfg.host in ("127.0.0.1", "localhost", "::1")
+
+    web_dir = Path(__file__).resolve().parent / "web"
+    if (web_dir / "index.html").exists():
+        app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")
+    else:
+        @app.get("/")
+        def _placeholder() -> dict:
+            return {
+                "status": "placeholder",
+                "message": (
+                    "Frontend bundle not built yet. "
+                    "Run `cd frontend && npm install && npm run build`."
+                ),
+            }
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:

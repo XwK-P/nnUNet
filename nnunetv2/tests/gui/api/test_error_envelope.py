@@ -8,6 +8,11 @@ def test_unhandled_exception_returns_error_envelope(app):
     def crash() -> dict:
         raise RuntimeError("synthetic failure for envelope test")
 
+    # The static-files mount at "/" is registered inside create_app and
+    # otherwise shadows late-added routes. Move our route to the front so
+    # it wins matching.
+    app.router.routes.insert(0, app.router.routes.pop())
+
     client = TestClient(app, raise_server_exceptions=False)
 
     r = client.get("/__test_crash__")
@@ -40,6 +45,9 @@ def test_unhandled_exception_hides_message_on_non_loopback(gui_paths):
     @app.get("/__test_crash__")
     def crash() -> dict:
         raise RuntimeError("secret path /etc/passwd")
+
+    # See sibling test: prepend so the static-files mount doesn't shadow us.
+    app.router.routes.insert(0, app.router.routes.pop())
 
     client = TestClient(app, raise_server_exceptions=False)
     r = client.get("/__test_crash__")
