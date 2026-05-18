@@ -1,14 +1,5 @@
 <script lang="ts">
-  import { createWorkspaceStore } from '../lib/stores/workspace';
-
-  const ws = createWorkspaceStore();
-  let current = $state<string | null>(ws.get());
-
-  ws.subscribe((v) => (current = v));
-
-  function clear(): void {
-    ws.clear();
-  }
+  import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
 </script>
 
 <header
@@ -16,12 +7,7 @@
 >
   <strong class="text-slate-100">nnU-Net Manager</strong>
 
-  <span class="bg-bg-soft px-2 py-0.5 rounded text-slate-400">
-    Workspace: {current ?? '(none — pick a dataset)'}
-    {#if current}
-      <button class="ml-2 text-slate-500 hover:text-slate-300" onclick={clear}>×</button>
-    {/if}
-  </span>
+  <WorkspaceSwitcher />
 
   <span class="bg-emerald-900 text-emerald-200 px-2 py-0.5 rounded-full text-[10px]">
     ● 0 jobs running
