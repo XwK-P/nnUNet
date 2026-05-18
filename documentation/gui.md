@@ -1,7 +1,7 @@
 # nnU-Net GUI Manager
 
 A browser-based experiment & dataset manager that wraps every `nnUNetv2_*` CLI command.
-Status: **Phase 1** — read-only browse of datasets and runs. Subsequent phases add live monitoring, training launches, and prediction.
+Status: **Phase 2** — read-only browse plus image viewer (case browser per dataset, prediction review per run). Subsequent phases add live monitoring, training launches, and prediction.
 
 ## Install
 
@@ -38,15 +38,16 @@ Opens the GUI at http://127.0.0.1:8765 in your default browser.
 | `--results` | `$nnUNet_results` | Override the results root. |
 | `--open` | off | Open the GUI in the default browser after startup. |
 
-## What you can do today (after Phase 1)
+## What you can do today (after Phase 2)
 
 - Browse every dataset in `$nnUNet_raw` from the **Datasets** page.
 - Inspect any dataset's `plans.json` and `dataset_fingerprint.json`.
 - Browse every training run in `$nnUNet_results` from the **Monitor** page.
 - Use the **Workspace** switcher in the header to scope downstream pages to a single dataset.
 - See aggregate stats and recent runs on the **Dashboard**.
+2. **Image viewer** ✓ — NiiVue + PNG slice preview, case browser per dataset, prediction review per run.
 
-Phase 1 is read-only — launching trainings, live monitoring, predictions, and exports arrive in Phases 3–6.
+Phase 2 is still read-only — launching trainings, live monitoring, and exports arrive in Phases 3–6.
 
 ## Security
 
@@ -60,7 +61,7 @@ The full design lives at [docs/superpowers/specs/2026-05-16-nnunet-gui-manager-d
 
 0. **Foundation** ✓ — scaffold, CLI, healthz.
 1. **Read-only browse** ✓ — filesystem discovery, dataset/run lists, plans/fingerprint inspector, dashboard cards backed by historical data.
-2. **Image viewer** — NiiVue, case browser, prediction review.
+2. **Image viewer** ✓ — NiiVue + PNG slice preview, case browser per dataset, prediction review per run.
 3. **Live monitoring (passive)** — Monitor page, jobs read-only.
 4. **Job launching** — preprocess/train/predict.
 5. **Compare** — multi-run overlay + table.
