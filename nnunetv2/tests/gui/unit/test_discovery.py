@@ -43,3 +43,26 @@ def test_scan_raw_handles_multi_modality(gui_paths):
     assert len(found) == 1
     assert found[0].modality_count == 4
     assert found[0].case_count == 2
+
+
+def test_scan_preprocessed_marks_dataset(populated_paths):
+    from nnunetv2.gui.state.discovery import scan_preprocessed
+    pre = scan_preprocessed(populated_paths["preprocessed"])
+    assert pre == {"Dataset027_ACDC": str(populated_paths["preprocessed"] / "Dataset027_ACDC")}
+
+
+def test_scan_preprocessed_empty(gui_paths):
+    from nnunetv2.gui.state.discovery import scan_preprocessed
+    assert scan_preprocessed(gui_paths["preprocessed"]) == {}
+
+
+def test_read_fingerprint_returns_dict(populated_paths):
+    from nnunetv2.gui.state.discovery import read_fingerprint
+    fp = read_fingerprint(populated_paths["preprocessed"] / "Dataset027_ACDC")
+    assert "spacings" in fp
+
+
+def test_read_fingerprint_missing_returns_none(tmp_path):
+    from nnunetv2.gui.state.discovery import read_fingerprint
+    (tmp_path / "no_fp").mkdir()
+    assert read_fingerprint(tmp_path / "no_fp") is None

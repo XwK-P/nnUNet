@@ -76,3 +76,28 @@ def _count_cases_and_modalities(folder: Path) -> tuple[int, int]:
             continue
         case_ids.add(m.group(1))
     return len(case_ids), modality_count
+
+
+def scan_preprocessed(preprocessed_root: Path) -> dict[str, str]:
+    """Return {dataset_folder_name: absolute_path} for every preprocessed dataset."""
+    if not preprocessed_root.is_dir():
+        return {}
+    out: dict[str, str] = {}
+    for entry in sorted(preprocessed_root.iterdir()):
+        if not entry.is_dir():
+            continue
+        if not DATASET_DIR_RE.match(entry.name):
+            continue
+        out[entry.name] = str(entry)
+    return out
+
+
+def read_fingerprint(dataset_preprocessed_dir: Path) -> Optional[dict]:
+    """Read dataset_fingerprint.json if present; return None otherwise."""
+    fp = dataset_preprocessed_dir / "dataset_fingerprint.json"
+    if not fp.is_file():
+        return None
+    try:
+        return json.loads(fp.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
