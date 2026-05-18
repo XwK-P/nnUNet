@@ -58,3 +58,15 @@ export interface DashboardData {
     };
   };
 }
+
+export interface Case {
+  id: string;
+  dataset_id: string;
+  channels: Record<string, string>;
+  label_path: string | null;
+}
+
+export interface Prediction {
+  case_id: string;
+  path: string;
+}

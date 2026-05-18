@@ -70,7 +70,7 @@ export const api = {
   },
 };
 
-import type { Dataset, Run, RunFilter, DashboardData } from './types';
+import type { Case, Dataset, Prediction, Run, RunFilter, DashboardData } from './types';
 
 function qs(params: Record<string, string | undefined>): string {
   const usp = new URLSearchParams();
@@ -92,4 +92,44 @@ export const endpoints = {
     api.get<Run[]>(`/api/runs${qs(filter as Record<string, string | undefined>)}`),
   getRun: (id: string) => api.get<Run>(`/api/runs/${id}`),
   getDashboard: () => api.get<DashboardData>('/api/dashboard'),
+};
+
+export const imageEndpoints = {
+  getCases: (datasetId: string): Promise<Case[]> =>
+    api.get<Case[]>(`/api/datasets/${encodeURIComponent(datasetId)}/cases`),
+
+  getCasePreviewUrl: (
+    datasetId: string, caseId: string,
+    opts: { axis: number; slice: number; channel: number; window?: [number, number] },
+  ): string => {
+    const q = new URLSearchParams({
+      axis: String(opts.axis),
+      slice: String(opts.slice),
+      channel: String(opts.channel),
+    });
+    if (opts.window) {
+      q.set('window_lo', String(opts.window[0]));
+      q.set('window_hi', String(opts.window[1]));
+    }
+    return `/api/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}/preview?${q}`;
+  },
+
+  getCaseLabelsUrl: (
+    datasetId: string, caseId: string,
+    opts: { axis: number; slice: number },
+  ): string => {
+    const q = new URLSearchParams({ axis: String(opts.axis), slice: String(opts.slice) });
+    return `/api/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}/labels?${q}`;
+  },
+
+  getPredictions: (runId: string): Promise<Prediction[]> =>
+    api.get<Prediction[]>(`/api/runs/${runId}/predictions`),
+
+  getPredictionPreviewUrl: (
+    runId: string, caseId: string,
+    opts: { axis: number; slice: number },
+  ): string => {
+    const q = new URLSearchParams({ axis: String(opts.axis), slice: String(opts.slice) });
+    return `/api/runs/${runId}/predictions/${encodeURIComponent(caseId)}?${q}`;
+  },
 };
