@@ -1,7 +1,7 @@
 # nnU-Net GUI Manager
 
 A browser-based experiment & dataset manager that wraps every `nnUNetv2_*` CLI command.
-Status: **Phase 0** — scaffolding only. Subsequent phases add features.
+Status: **Phase 1** — read-only browse of datasets and runs. Subsequent phases add live monitoring, training launches, and prediction.
 
 ## Install
 
@@ -44,12 +44,22 @@ The server binds to `127.0.0.1` and requires no authentication by default. Bindi
 
 The GUI never sends data off your machine.
 
+## What you can do today (after Phase 1)
+
+- Browse every dataset in `$nnUNet_raw` from the **Datasets** page.
+- Inspect any dataset's `plans.json` and `dataset_fingerprint.json`.
+- Browse every training run in `$nnUNet_results` from the **Monitor** page.
+- Use the **Workspace** switcher in the header to scope downstream pages to a single dataset.
+- See aggregate stats and recent runs on the **Dashboard**.
+
+Phase 1 is read-only — launching trainings, live monitoring, predictions, and exports arrive in Phases 3–6.
+
 ## Roadmap
 
 The full design lives at [docs/superpowers/specs/2026-05-16-nnunet-gui-manager-design.md](../docs/superpowers/specs/2026-05-16-nnunet-gui-manager-design.md). v1 ships in 7 phases:
 
-0. **Foundation** ✓ (this page) — scaffold, CLI, healthz.
-1. **Read-only browse** — dataset/run lists, plans inspector.
+0. **Foundation** ✓ — scaffold, CLI, healthz.
+1. **Read-only browse** ✓ — filesystem discovery, dataset/run lists, plans/fingerprint inspector, dashboard cards backed by historical data.
 2. **Image viewer** — NiiVue, case browser, prediction review.
 3. **Live monitoring (passive)** — Monitor page, jobs read-only.
 4. **Job launching** — preprocess/train/predict.
