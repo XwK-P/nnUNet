@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
+from nnunetv2.gui.services.images import get_slice_png_cached
 from nnunetv2.gui.state.cases import Case, list_cases_for_dataset
 from nnunetv2.gui.state.datasets import (
     Dataset, list_datasets, get_dataset, fingerprint_dict,
@@ -61,5 +63,38 @@ def make_router() -> APIRouter:
         if get_dataset(cfg, dataset_id) is None:
             raise HTTPException(status_code=404, detail=f"Dataset {dataset_id!r} not found")
         return list_cases_for_dataset(cfg, dataset_id)
+
+    @router.get("/{dataset_id}/cases/{case_id}/preview")
+    def case_preview(
+        dataset_id: str, case_id: str, request: Request,
+        axis: int = 0, slice: int = 0, channel: int = 0,
+        window_lo: Optional[float] = None, window_hi: Optional[float] = None,
+    ) -> Response:
+        cfg = request.app.state.gui_config
+        cases = list_cases_for_dataset(cfg, dataset_id)
+        match = next((c for c in cases if c.id == case_id), None)
+        if match is None:
+            raise HTTPException(status_code=404, detail=f"Case {case_id!r} not found")
+        chan_key = str(channel)
+        if chan_key not in match.channels:
+            raise HTTPException(status_code=404, detail=f"Channel {channel} not found")
+        window = (window_lo, window_hi) if (window_lo is not None and window_hi is not None) else None
+        png = get_slice_png_cached(match.channels[chan_key], axis=axis, index=slice, window=window)
+        return Response(content=png, media_type="image/png")
+
+    @router.get("/{dataset_id}/cases/{case_id}/labels")
+    def case_labels(
+        dataset_id: str, case_id: str, request: Request,
+        axis: int = 0, slice: int = 0,
+    ) -> Response:
+        cfg = request.app.state.gui_config
+        cases = list_cases_for_dataset(cfg, dataset_id)
+        match = next((c for c in cases if c.id == case_id), None)
+        if match is None:
+            raise HTTPException(status_code=404, detail=f"Case {case_id!r} not found")
+        if not match.label_path:
+            raise HTTPException(status_code=404, detail=f"No label for case {case_id!r}")
+        png = get_slice_png_cached(match.label_path, axis=axis, index=slice, window=None)
+        return Response(content=png, media_type="image/png")
 
     return router
