@@ -82,10 +82,25 @@ nnUNetv2_evaluate_folder = "nnunetv2.evaluation.evaluate_predictions:evaluate_fo
 nnUNetv2_evaluate_simple = "nnunetv2.evaluation.evaluate_predictions:evaluate_simple_entry_point"
 nnUNetv2_convert_MSD_dataset = "nnunetv2.dataset_conversion.convert_MSD_dataset:entry_point"
 nnUNetv2_convert_to_medh5 = "nnunetv2.dataset_conversion.convert_to_medh5:main"
+nnUNetv2_gui = "nnunetv2.gui.cli:main"
 
 [project.optional-dependencies]
 dev = [
     "pre-commit"
+]
+gui = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "sse-starlette>=2.1",
+    "watchfiles>=0.22",
+    "aiofiles>=23.2",
+    "psutil>=5.9",
+    "pynvml>=11.5",
+    "tbparse>=0.0.8",
+    "sqlalchemy>=2.0",
+    "pillow>=10.0",
+    "nibabel>=5.2",
+    "httpx>=0.27",
 ]
 intel_macos = [
     "torch<2.3",
@@ -97,6 +112,9 @@ medh5 = [
 
 [tool.setuptools.packages.find]
 include = ["nnunetv2*"]
+
+[tool.setuptools.package-data]
+nnunetv2 = ["gui/web/**/*"]
 
 [build-system]
 requires = ["setuptools>=67.8.0"]
