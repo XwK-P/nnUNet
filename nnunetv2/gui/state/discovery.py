@@ -152,3 +152,61 @@ def scan_results_runs(results_root: Path) -> list[DiscoveredRun]:
                     status=status,
                 ))
     return out
+
+
+def reconcile(cfg) -> None:
+    """One-shot scan of raw + preprocessed + results, upserting all records.
+
+    Imports the repositories lazily to keep `discovery` decoupled from `state.{datasets,runs}`.
+    """
+    from datetime import datetime, timezone
+    import json
+
+    from nnunetv2.gui.state.datasets import Dataset, upsert_dataset, get_dataset
+    from nnunetv2.gui.state.runs import Run, upsert_run
+
+    now = datetime.now(timezone.utc)
+    preprocessed_map = scan_preprocessed(cfg.preprocessed)
+
+    for d in scan_raw_datasets(cfg.raw):
+        preprocessed_path = preprocessed_map.get(d.id)
+        fingerprint_json = None
+        if preprocessed_path:
+            fp = read_fingerprint(Path(preprocessed_path))
+            if fp is not None:
+                fingerprint_json = json.dumps(fp)
+        ds = Dataset(
+            id=d.id,
+            dataset_id_int=d.dataset_id_int,
+            name=d.name,
+            raw_path=d.raw_path,
+            preprocessed_path=preprocessed_path,
+            last_scanned_at=now,
+            fingerprint_json=fingerprint_json,
+            case_count=d.case_count,
+            modality_count=d.modality_count,
+        )
+        upsert_dataset(cfg, ds)
+
+    for r in scan_results_runs(cfg.results):
+        # Preserve created_at if the row already exists; otherwise set now.
+        # For Phase 1 we treat last_seen_at = now for any rediscovered run.
+        from nnunetv2.gui.state.runs import get_run
+        existing = get_run(cfg, r.id)
+        created = existing.created_at if existing else now
+        run = Run(
+            id=r.id,
+            dataset_id=r.dataset_id,
+            plans_name=r.plans_name,
+            trainer_name=r.trainer_name,
+            configuration=r.configuration,
+            fold=r.fold,
+            output_folder=r.output_folder,
+            status=r.status,
+            source=existing.source if existing else "unknown",
+            created_at=created,
+            last_seen_at=now,
+            tags_json=existing.tags_json if existing else None,
+            notes=existing.notes if existing else None,
+        )
+        upsert_run(cfg, run)

@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from nnunetv2.gui.config import GuiConfig
 from nnunetv2.gui.db import init_db
 from nnunetv2.gui.routers import system as system_router
+from nnunetv2.gui.state.discovery import reconcile
 
 
 log = logging.getLogger("nnunetv2.gui")
@@ -18,6 +19,7 @@ log = logging.getLogger("nnunetv2.gui")
 
 def create_app(cfg: GuiConfig) -> FastAPI:
     init_db(cfg)
+    reconcile(cfg)
 
     app = FastAPI(
         title="nnU-Net GUI",
