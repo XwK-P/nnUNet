@@ -38,12 +38,6 @@ Opens the GUI at http://127.0.0.1:8765 in your default browser.
 | `--results` | `$nnUNet_results` | Override the results root. |
 | `--open` | off | Open the GUI in the default browser after startup. |
 
-## Security
-
-The server binds to `127.0.0.1` and requires no authentication by default. Binding to a non-loopback host requires `--token <hex>`, which becomes the bearer token required on every request.
-
-The GUI never sends data off your machine.
-
 ## What you can do today (after Phase 1)
 
 - Browse every dataset in `$nnUNet_raw` from the **Datasets** page.
@@ -53,6 +47,12 @@ The GUI never sends data off your machine.
 - See aggregate stats and recent runs on the **Dashboard**.
 
 Phase 1 is read-only — launching trainings, live monitoring, predictions, and exports arrive in Phases 3–6.
+
+## Security
+
+The server binds to `127.0.0.1` and requires no authentication by default. Binding to a non-loopback host requires `--token <hex>`, which becomes the bearer token required on every request.
+
+The GUI never sends data off your machine.
 
 ## Roadmap
 
