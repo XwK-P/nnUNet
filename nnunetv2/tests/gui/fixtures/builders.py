@@ -86,3 +86,19 @@ def build_run(
         (fold_dir / "validation" / "summary.json").write_text(json.dumps({"foreground_mean": {"Dice": 0.9}}))
     canonical_id = f"{dataset_folder}/{plans_name}__{trainer_name}__{configuration}/fold_{fold}"
     return fold_dir, canonical_id
+
+
+def build_case_nifti(folder: Path, name: str, shape: tuple[int, int, int] = (16, 16, 16)) -> Path:
+    """Write a tiny synthetic NIfTI under `folder/name`. Returns the file path.
+
+    Uses nibabel to produce a real, openable file with deterministic content
+    (a per-voxel index gradient). Roughly 4 KB for shape (16,16,16) float32.
+    """
+    import numpy as np
+    import nibabel as nib
+    folder.mkdir(parents=True, exist_ok=True)
+    arr = np.arange(int(np.prod(shape)), dtype=np.float32).reshape(shape)
+    img = nib.Nifti1Image(arr, affine=np.eye(4))
+    path = folder / name
+    nib.save(img, str(path))
+    return path
