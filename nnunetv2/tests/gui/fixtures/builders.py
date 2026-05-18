@@ -102,3 +102,21 @@ def build_case_nifti(folder: Path, name: str, shape: tuple[int, int, int] = (16,
     path = folder / name
     nib.save(img, str(path))
     return path
+
+
+def build_run_predictions(
+    fold_dir: Path,
+    *,
+    case_ids: Iterable[str] = ("case_001",),
+    use_real_nifti: bool = False,
+) -> Path:
+    """Create a fold_<n>/predictions/ directory with one .nii.gz per case_id."""
+    pred_dir = fold_dir / "predictions"
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    for cid in case_ids:
+        path = pred_dir / f"{cid}.nii.gz"
+        if use_real_nifti:
+            build_case_nifti(pred_dir, f"{cid}.nii.gz", shape=(8, 16, 16))
+        else:
+            path.touch()
+    return pred_dir

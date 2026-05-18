@@ -89,3 +89,15 @@ def populated_nifti_paths(gui_paths):
     build_case_nifti(images_tr, "case_001_0000.nii.gz", shape=(8, 16, 16))
     build_case_nifti(labels_tr, "case_001.nii.gz", shape=(8, 16, 16))
     return gui_paths
+
+
+@pytest.fixture
+def populated_client(populated_paths, monkeypatch):
+    """TestClient bound to a populated paths fixture (3 cases, 2 runs, no NIfTI)."""
+    monkeypatch.setenv("nnUNet_raw", str(populated_paths["raw"]))
+    monkeypatch.setenv("nnUNet_preprocessed", str(populated_paths["preprocessed"]))
+    monkeypatch.setenv("nnUNet_results", str(populated_paths["results"]))
+    from fastapi.testclient import TestClient
+    from nnunetv2.gui.config import GuiConfig
+    from nnunetv2.gui.server import create_app
+    return TestClient(create_app(GuiConfig.from_env_and_args(host="127.0.0.1", port=0, token=None)))
