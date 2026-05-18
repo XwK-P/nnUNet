@@ -69,3 +69,27 @@ export const api = {
     });
   },
 };
+
+import type { Dataset, Run, RunFilter, DashboardData } from './types';
+
+function qs(params: Record<string, string | undefined>): string {
+  const usp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') usp.set(k, v);
+  }
+  const s = usp.toString();
+  return s ? `?${s}` : '';
+}
+
+export const endpoints = {
+  getDatasets: () => api.get<Dataset[]>('/api/datasets'),
+  getDataset: (id: string) => api.get<Dataset>(`/api/datasets/${encodeURIComponent(id)}`),
+  getDatasetPlans: (id: string) =>
+    api.get<Record<string, unknown>>(`/api/datasets/${encodeURIComponent(id)}/plans`),
+  getDatasetFingerprint: (id: string) =>
+    api.get<Record<string, unknown>>(`/api/datasets/${encodeURIComponent(id)}/fingerprint`),
+  getRuns: (filter: RunFilter = {}) =>
+    api.get<Run[]>(`/api/runs${qs(filter as Record<string, string | undefined>)}`),
+  getRun: (id: string) => api.get<Run>(`/api/runs/${id}`),
+  getDashboard: () => api.get<DashboardData>('/api/dashboard'),
+};
