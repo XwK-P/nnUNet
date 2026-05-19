@@ -286,3 +286,20 @@ export interface ExportModelRequest {
 export interface ImportModelRequest {
   zip_path: string;
 }
+
+export interface EnvVar {
+  name: string;
+  value: string | null;
+  editable: boolean;
+}
+
+export interface EnvVarsResponse {
+  vars: EnvVar[];
+}
+
+export type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
+
+export interface RunUpdateRequest {
+  tags?: string[];
+  notes?: string;
+}

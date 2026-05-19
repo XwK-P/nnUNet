@@ -68,6 +68,13 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
+  put<T>(url: string, body: unknown): Promise<T> {
+    return request<T>(url, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  },
 };
 
 import type {
@@ -75,10 +82,13 @@ import type {
   CompareResponse,
   Dataset,
   EnsembleRequest,
+  EnvVarsResponse,
   ExportModelRequest,
   FindBestConfigRequest,
   GpuInfo,
   ImportModelRequest,
+  Job,
+  LogLevel,
   Model,
   PerCaseMetricsResponse,
   PostprocRequest,
@@ -89,6 +99,7 @@ import type {
   PreprocessRequest,
   Run,
   RunFilter,
+  RunUpdateRequest,
   DashboardData,
   TrainBatchRequest,
   TrainLaunchResponse,
@@ -137,6 +148,14 @@ export const endpoints = {
     api.post<{ job_id: number }>('/api/models/ensemble', req),
   postPostproc: (req: PostprocRequest): Promise<{ job_id: number }> =>
     api.post<{ job_id: number }>('/api/postproc/apply', req),
+  getEnvVars: (): Promise<EnvVarsResponse> => api.get<EnvVarsResponse>('/api/system/env'),
+  getLogLevel: (): Promise<{ level: LogLevel }> =>
+    api.get<{ level: LogLevel }>('/api/system/log_level'),
+  putLogLevel: (level: LogLevel): Promise<{ level: LogLevel }> =>
+    api.put<{ level: LogLevel }>('/api/system/log_level', { level }),
+  updateRun: (id: string, body: RunUpdateRequest): Promise<Run> =>
+    api.put<Run>(`/api/runs/${id}`, body),
+  getJobs: (): Promise<Job[]> => api.get<Job[]>('/api/jobs'),
 };
 
 export const imageEndpoints = {
