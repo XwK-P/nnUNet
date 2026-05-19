@@ -66,3 +66,16 @@ def test_update_status_with_terminal_fields(gui_config):
     assert j2.status == "completed"
     assert j2.exit_code == 0
     assert j2.ended_at is not None
+
+
+def test_job_default_slot_is_global(gui_config):
+    init_db(gui_config)
+    j = insert_job(gui_config, _make())
+    assert j.slot == "global"
+
+
+def test_job_explicit_slot_preserved(gui_config):
+    init_db(gui_config)
+    j = insert_job(gui_config, _make(slot="dataset_27"))
+    fetched = get_job(gui_config, j.id)
+    assert fetched.slot == "dataset_27"

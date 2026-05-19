@@ -73,6 +73,7 @@ job_table = Table(
     Column("output_run_id", String, nullable=True),
     Column("created_by", String, nullable=True),
     Column("error_message", String, nullable=True),
+    Column("slot", String, nullable=False, server_default="global"),
     Index("ix_job_status", "status"),
 )
 
