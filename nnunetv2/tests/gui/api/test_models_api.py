@@ -68,3 +68,23 @@ def test_export_enqueues_job(models_client):
 def test_export_validation_error(models_client):
     r = models_client.post("/api/models/export", json={})
     assert r.status_code == 422
+
+
+def test_import_dry_run(models_client):
+    r = models_client.post("/api/models/import?dry_run=true",
+                            json={"zip_path": "/tmp/some_model.zip"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["argv"] == ["nnUNetv2_install_pretrained_model_from_zip", "/tmp/some_model.zip"]
+
+
+def test_import_enqueue(models_client):
+    r = models_client.post("/api/models/import",
+                            json={"zip_path": "/tmp/some_model.zip"})
+    assert r.status_code == 201
+    assert "job_id" in r.json()
+
+
+def test_import_validation_error(models_client):
+    r = models_client.post("/api/models/import", json={})
+    assert r.status_code == 422
