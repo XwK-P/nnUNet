@@ -3,11 +3,18 @@
   import { createDatasetsStore } from '../lib/stores/datasets';
   import { createWorkspaceStore } from '../lib/stores/workspace';
   import PredictForm from '../lib/forms/PredictForm.svelte';
+  import PredictPaneViewer from '../components/PredictPaneViewer.svelte';
+  import PerCaseMetricsTable from '../components/PerCaseMetricsTable.svelte';
 
   const ws = createWorkspaceStore();
   const ds = createDatasetsStore();
   let workspaceId = $state<string | null>(ws.get());
   let dsState = $state(ds.get());
+
+  let predictionFolder = $state<string>('');
+  let inputUrl = $state<string>('');
+  let labelUrl = $state<string | null>(null);
+  let predictionUrl = $state<string | null>(null);
 
   onMount(() => {
     const u1 = ws.subscribe((v) => (workspaceId = v));
@@ -36,7 +43,27 @@
     Dataset has no numeric id (dataset_id_int) so it can't be used by nnUNetv2_predict.
   </p>
 {:else}
-  <div class="mt-4 max-w-2xl">
+  <div class="mt-4 grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-4">
     <PredictForm datasetIdInt={datasetIntFor} />
+
+    <div class="space-y-3">
+      <div class="bg-bg-soft border border-border-soft rounded p-3">
+        <h4 class="text-xs uppercase tracking-wider text-slate-500 mb-2">Review predictions</h4>
+        <label class="block text-xs text-slate-500 mb-1" for="predict-folder">Prediction folder</label>
+        <input
+          id="predict-folder"
+          class="w-full bg-bg-panel border border-border-soft rounded px-2 py-1 text-sm text-slate-100"
+          bind:value={predictionFolder}
+          placeholder="/abs/path/predictions"
+        />
+      </div>
+
+      {#if inputUrl}
+        <PredictPaneViewer {inputUrl} {labelUrl} {predictionUrl} />
+      {/if}
+      {#if predictionFolder}
+        <PerCaseMetricsTable {predictionFolder} />
+      {/if}
+    </div>
   </div>
 {/if}
