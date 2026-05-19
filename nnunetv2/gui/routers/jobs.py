@@ -1,11 +1,17 @@
-"""Read-only Jobs router. Phase 3 lists GUI-tracked jobs; Phase 4 adds write actions."""
+"""Jobs router. Phase 3 lists GUI-tracked jobs; Phase 4 adds write actions."""
 from __future__ import annotations
 
+import asyncio
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, status
 
-from nnunetv2.gui.state.jobs import Job, JobFilter, get_job, list_jobs
+from nnunetv2.gui.jobs.signals import is_alive, kill_group, terminate
+from nnunetv2.gui.state.jobs import Job, JobFilter, get_job, list_jobs, update_job_status
 
 
 def make_router() -> APIRouter:
@@ -25,5 +31,74 @@ def make_router() -> APIRouter:
         if j is None:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         return j
+
+    @router.post("/{job_id}/stop")
+    async def stop(job_id: int, request: Request) -> dict:
+        cfg = request.app.state.gui_config
+        j = get_job(cfg, job_id)
+        if j is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if j.status not in ("starting", "running"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot stop a job in status {j.status!r}",
+            )
+        if j.pgid is None:
+            raise HTTPException(status_code=500, detail="job has no pgid recorded")
+        terminate(j.pgid)
+        # Grace period 5s for SIGTERM
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + 5
+        while is_alive(j.pgid) and loop.time() < deadline:
+            await asyncio.sleep(0.2)
+        if is_alive(j.pgid):
+            kill_group(j.pgid)
+            # Brief grace for SIGKILL to take effect
+            for _ in range(10):
+                if not is_alive(j.pgid):
+                    break
+                await asyncio.sleep(0.1)
+        update_job_status(
+            cfg, job_id, status="killed",
+            ended_at=datetime.now(timezone.utc),
+        )
+        return {"ok": True, "status": "killed"}
+
+    @router.post("/{job_id}/cancel")
+    async def cancel(job_id: int, request: Request) -> dict:
+        cfg = request.app.state.gui_config
+        j = get_job(cfg, job_id)
+        if j is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        q = request.app.state.job_queue
+        ok = await q.cancel(job_id)
+        if not ok:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot cancel — job is not queued (use /stop)",
+            )
+        return {"ok": True, "status": "cancelled"}
+
+    @router.post("/{job_id}/restart", status_code=status.HTTP_201_CREATED)
+    async def restart(job_id: int, request: Request) -> dict:
+        cfg = request.app.state.gui_config
+        old = get_job(cfg, job_id)
+        if old is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if old.status not in ("completed", "failed", "killed", "cancelled", "unknown"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot restart a job in status {old.status!r}",
+            )
+        argv = json.loads(old.args_json)
+        log_path = old.log_path or str(
+            Path(cfg.results) / ".nnunet_gui" / "logs" / f"restart_{job_id}.log"
+        )
+        new = await request.app.state.job_queue.enqueue(
+            kind=old.kind, argv=argv, env=os.environ.copy(),
+            log_path=log_path, output_run_id=old.output_run_id,
+            slot=old.slot,
+        )
+        return {"new_job_id": new.id}
 
     return router
