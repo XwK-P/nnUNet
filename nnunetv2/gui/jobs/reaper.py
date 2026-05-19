@@ -18,7 +18,7 @@ from typing import Optional
 
 from nnunetv2.gui.config import GuiConfig
 from nnunetv2.gui.jobs.signals import is_alive
-from nnunetv2.gui.state.jobs import Job, JobFilter, list_jobs, update_job_status
+from nnunetv2.gui.state.jobs import Job, JobFilter, get_job, list_jobs, update_job_status
 
 
 def _wait_process_blocking(pid: int) -> int:
@@ -58,11 +58,23 @@ def _wait_process_blocking(pid: int) -> int:
 
 
 async def run_reaper(cfg: GuiConfig, job_id: int, pid: Optional[int]) -> None:
-    """Await `pid` exit and write the terminal status row."""
+    """Await `pid` exit and write the terminal status row.
+
+    Preserves user-driven terminal states: when /api/jobs/{id}/stop has
+    already marked the row as `killed` (or /cancel as `cancelled`), the
+    reaper only records the observed exit_code, leaving status and
+    ended_at intact. Otherwise it derives status from the exit code:
+    0 = completed, anything else = failed.
+    """
     if pid is None:
         return
     loop = asyncio.get_running_loop()
     exit_code = await loop.run_in_executor(None, _wait_process_blocking, pid)
+    cur = get_job(cfg, job_id)
+    if cur is not None and cur.status in ("killed", "cancelled"):
+        # Record the actual exit code for diagnostics without rewriting status.
+        update_job_status(cfg, job_id, exit_code=exit_code)
+        return
     final_status = "completed" if exit_code == 0 else "failed"
     update_job_status(
         cfg, job_id,

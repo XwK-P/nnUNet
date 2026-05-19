@@ -37,6 +37,30 @@ async def test_reaper_marks_failed_on_nonzero_exit(gui_config):
 
 
 @pytest.mark.asyncio
+async def test_reaper_preserves_killed_status_after_stop(gui_config):
+    """When /api/jobs/{id}/stop has already marked the row 'killed', the
+    reaper must not rewrite that status to 'failed' based on the SIGTERM
+    exit code it observes when the subprocess actually exits.
+    """
+    from datetime import datetime, timezone
+    from nnunetv2.gui.state.jobs import update_job_status
+    init_db(gui_config)
+    argv = [sys.executable, "-m", "nnunetv2.tests.gui.helpers.sleep_helper", "0.1", "3"]
+    job = spawn(gui_config, kind="train", argv=argv, env=os.environ.copy(),
+                log_path=str(gui_config.results / "r_killed.log"))
+    # Simulate the stop handler running before the reaper observes the exit.
+    stop_time = datetime.now(timezone.utc)
+    update_job_status(gui_config, job.id, status="killed", ended_at=stop_time)
+    await asyncio.wait_for(run_reaper(gui_config, job.id, job.pid), timeout=5)
+    fetched = get_job(gui_config, job.id)
+    assert fetched.status == "killed", "reaper overwrote a user-initiated kill"
+    # Exit code still recorded for diagnostics.
+    assert fetched.exit_code == 3
+    # ended_at preserved from the stop handler.
+    assert fetched.ended_at is not None
+
+
+@pytest.mark.asyncio
 async def test_attach_on_boot_marks_unknown_for_dead_pid(gui_config):
     init_db(gui_config)
     j = insert_job(gui_config, Job(
