@@ -112,6 +112,26 @@ class JobQueue:
                           ended_at=datetime.now(timezone.utc))
         return True
 
+    async def kickstart_pending(self, env: Optional[dict[str, str]] = None) -> int:
+        """Resume queued slots after a server restart.
+
+        ``enqueue`` is what normally kicks a worker, so jobs left queued by
+        a previous boot would otherwise sit forever waiting for a fresh
+        enqueue to advance the lane. Walks `job WHERE status = 'queued'`,
+        groups by ``slot``, and starts one worker per distinct slot using
+        the current process environment by default.
+        """
+        env = env if env is not None else dict(os.environ)
+        queued = [j for j in list_jobs(self.cfg, JobFilter(status="queued"))]
+        slots = {j.slot for j in queued}
+        for slot in slots:
+            if self._locks[slot].locked():
+                continue
+            t = asyncio.create_task(self._worker_kick(slot, env))
+            self._tasks.add(t)
+            t.add_done_callback(self._tasks.discard)
+        return len(slots)
+
     async def drain(self, timeout: float = 30.0) -> None:
         """For tests: await all outstanding workers."""
         if not self._tasks:

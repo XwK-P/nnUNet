@@ -49,6 +49,10 @@ def create_app(cfg: GuiConfig) -> FastAPI:
     async def _attach_jobs_on_boot() -> None:
         tasks = await reaper_attach(cfg)
         app.state._boot_reaper_tasks = tasks
+        # Re-kick any queued jobs left over from a previous server boot.
+        # Without this, queued rows would sit forever until the next enqueue
+        # happened to land in the same slot.
+        await app.state.job_queue.kickstart_pending()
 
     @app.on_event("shutdown")
     async def _shutdown_jobs() -> None:

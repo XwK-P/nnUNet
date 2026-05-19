@@ -66,6 +66,30 @@ async def test_queue_cancel_nonexistent_returns_false(gui_config):
 
 
 @pytest.mark.asyncio
+async def test_kickstart_pending_resumes_queued_after_restart(gui_config):
+    """A queued row left from a previous boot must be picked up by kickstart_pending."""
+    from nnunetv2.gui.state.jobs import Job, insert_job
+    init_db(gui_config)
+    # Simulate a row written by a prior server boot.
+    insert_job(gui_config, Job(
+        id=None, kind="train",
+        args_json='["%s", "-m", "nnunetv2.tests.gui.helpers.sleep_helper", "0.05", "0"]'
+                  % sys.executable.replace("\\", "\\\\"),
+        pid=None, pgid=None, status="queued",
+        started_at=None, ended_at=None, exit_code=None,
+        log_path=str(gui_config.results / "boot.log"),
+        output_run_id=None, created_by="gui", error_message=None, slot="global",
+    ))
+    # Fresh queue (mimics a fresh process), no prior enqueue to kick the worker.
+    q = JobQueue(gui_config)
+    kicked = await q.kickstart_pending(env=os.environ.copy())
+    assert kicked == 1
+    await q.drain(timeout=10)
+    [row] = list_jobs(gui_config, JobFilter())
+    assert row.status == "completed"
+
+
+@pytest.mark.asyncio
 async def test_queue_failed_spawn_does_not_block_next(gui_config):
     init_db(gui_config)
     q = JobQueue(gui_config)

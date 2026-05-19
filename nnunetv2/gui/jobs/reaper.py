@@ -88,7 +88,9 @@ async def attach_on_boot(cfg: GuiConfig) -> list[asyncio.Task]:
         if job.status not in ("queued", "starting", "running"):
             continue
         if job.status == "queued":
-            # Will be picked up by the queue advancer; nothing to do here.
+            # JobQueue.kickstart_pending() (called from the server startup
+            # hook right after reaper_attach) re-kicks workers for any slot
+            # that still has queued rows. Nothing pid-shaped to do here.
             continue
         if job.pid is None:
             update_job_status(
