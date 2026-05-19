@@ -88,3 +88,19 @@ def test_import_enqueue(models_client):
 def test_import_validation_error(models_client):
     r = models_client.post("/api/models/import", json={})
     assert r.status_code == 422
+
+
+def test_find_best_dry_run(models_client):
+    r = models_client.post("/api/models/find_best?dry_run=true",
+                            json={"dataset_id": 27, "configurations": ["3d_fullres", "2d"]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["argv"][0] == "nnUNetv2_find_best_configuration"
+    assert "27" in body["argv"]
+
+
+def test_find_best_enqueue(models_client):
+    r = models_client.post("/api/models/find_best",
+                            json={"dataset_id": 27})
+    assert r.status_code == 201
+    assert "job_id" in r.json()
