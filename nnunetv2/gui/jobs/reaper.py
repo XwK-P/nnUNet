@@ -21,8 +21,20 @@ from nnunetv2.gui.jobs.signals import is_alive
 from nnunetv2.gui.state.jobs import Job, JobFilter, get_job, list_jobs, update_job_status
 
 
-def _wait_process_blocking(pid: int) -> int:
-    """Block until pid exits; return exit code (or -1 if it cannot be determined)."""
+def _wait_process_blocking(pid: int) -> Optional[int]:
+    """Block until pid exits; return exit code, or None if it cannot be determined.
+
+    Returns:
+      * int (incl. negative for POSIX signal-termination):
+          definitive exit status, observed because pid was our child.
+      * None:
+          we waited for pid to leave the proc table but could not read its
+          exit code — e.g. attach_on_boot is following a process from a
+          previous server boot, so it isn't a child of this process and
+          neither psutil.Process.wait() nor os.waitpid will return a status.
+          Callers should fall back to disk evidence rather than treating
+          this as "failed".
+    """
     try:
         import psutil
     except ImportError:
@@ -32,12 +44,14 @@ def _wait_process_blocking(pid: int) -> int:
         try:
             p = psutil.Process(pid)
         except psutil.NoSuchProcess:
-            return -1
+            return None
         try:
             rc = p.wait()
-            return int(rc) if rc is not None else -1
+            # psutil returns None for non-children on POSIX because it can't
+            # read the exit status — that's the "unknown" sentinel we want.
+            return int(rc) if rc is not None else None
         except psutil.NoSuchProcess:
-            return -1
+            return None
 
     # Fallback (POSIX only): try os.waitpid, else poll.
     if os.name == "posix":
@@ -47,24 +61,31 @@ def _wait_process_blocking(pid: int) -> int:
                 return os.WEXITSTATUS(status)
             if os.WIFSIGNALED(status):
                 return -os.WTERMSIG(status)
-            return -1
+            return None
         except ChildProcessError:
-            # Not a child; poll instead.
+            # Not a child; poll until it disappears, then surface "unknown"
+            # so run_reaper can fall back to disk evidence.
             import time
             while is_alive(pid):
                 time.sleep(0.5)
-            return 0
-    return -1
+            return None
+    return None
 
 
 async def run_reaper(cfg: GuiConfig, job_id: int, pid: Optional[int]) -> None:
     """Await `pid` exit and write the terminal status row.
 
-    Preserves user-driven terminal states: when /api/jobs/{id}/stop has
-    already marked the row as `killed` (or /cancel as `cancelled`), the
-    reaper only records the observed exit_code, leaving status and
-    ended_at intact. Otherwise it derives status from the exit code:
-    0 = completed, anything else = failed.
+    Three branches:
+      1. Row was already moved into a terminal state by the stop/cancel
+         handler (status == 'killed' or 'cancelled'): record the observed
+         exit code for diagnostics only; leave status + ended_at alone.
+      2. We know the exit code: 0 = completed, non-zero = failed.
+      3. Exit code is unknown (typical when attach_on_boot is following
+         a re-attached non-child process): defer to disk evidence
+         (`checkpoint_final.pth` for trainings) instead of falsely
+         marking the job 'failed'. _disk_evidence_terminal_status
+         returns 'completed' when the disk indicates success, otherwise
+         'unknown' so an operator can reconcile from the Jobs page.
     """
     if pid is None:
         return
@@ -72,8 +93,24 @@ async def run_reaper(cfg: GuiConfig, job_id: int, pid: Optional[int]) -> None:
     exit_code = await loop.run_in_executor(None, _wait_process_blocking, pid)
     cur = get_job(cfg, job_id)
     if cur is not None and cur.status in ("killed", "cancelled"):
-        # Record the actual exit code for diagnostics without rewriting status.
-        update_job_status(cfg, job_id, exit_code=exit_code)
+        if exit_code is not None:
+            update_job_status(cfg, job_id, exit_code=exit_code)
+        return
+    if exit_code is None:
+        # Re-attached non-child: use disk evidence rather than assume failure.
+        evidence_job = cur if cur is not None else get_job(cfg, job_id)
+        terminal = (
+            _disk_evidence_terminal_status(cfg, evidence_job)
+            if evidence_job is not None
+            else "unknown"
+        )
+        update_job_status(
+            cfg, job_id,
+            status=terminal,
+            ended_at=datetime.now(timezone.utc),
+            error_message=("exit code unrecoverable (re-attached pid)"
+                           if terminal == "unknown" else None),
+        )
         return
     final_status = "completed" if exit_code == 0 else "failed"
     update_job_status(

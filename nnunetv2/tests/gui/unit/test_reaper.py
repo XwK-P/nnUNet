@@ -37,6 +37,59 @@ async def test_reaper_marks_failed_on_nonzero_exit(gui_config):
 
 
 @pytest.mark.asyncio
+async def test_reaper_uses_disk_evidence_when_exit_code_unknown(gui_config, monkeypatch):
+    """Re-attached non-child processes return None from psutil.Process.wait().
+
+    The reaper must not treat that as 'failed'; it should defer to disk
+    evidence (checkpoint_final.pth for trainings) and otherwise mark the
+    row 'unknown' for an operator to reconcile.
+    """
+    init_db(gui_config)
+    # Simulate the path attach_on_boot would take: a row in 'running' state
+    # for a train job that already produced checkpoint_final.pth on disk.
+    run_id = "Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0"
+    fold_dir = gui_config.results / run_id
+    fold_dir.mkdir(parents=True, exist_ok=True)
+    (fold_dir / "checkpoint_final.pth").write_bytes(b"x")
+    j = insert_job(gui_config, Job(
+        id=None, kind="train", args_json="[]", pid=1, pgid=1,
+        status="running", started_at=None, ended_at=None, exit_code=None,
+        log_path=None, output_run_id=run_id, created_by="gui",
+        error_message=None, slot="global",
+    ))
+    # Force _wait_process_blocking → None (the "non-child" case).
+    monkeypatch.setattr(
+        "nnunetv2.gui.jobs.reaper._wait_process_blocking",
+        lambda pid: None,
+    )
+    await asyncio.wait_for(run_reaper(gui_config, j.id, j.pid), timeout=5)
+    fetched = get_job(gui_config, j.id)
+    assert fetched.status == "completed", (
+        "disk evidence (checkpoint_final.pth) should drive status to "
+        "completed when the actual exit code is unrecoverable"
+    )
+
+
+@pytest.mark.asyncio
+async def test_reaper_unknown_when_no_disk_evidence_and_no_exit_code(gui_config, monkeypatch):
+    init_db(gui_config)
+    j = insert_job(gui_config, Job(
+        id=None, kind="predict", args_json="[]", pid=1, pgid=1,
+        status="running", started_at=None, ended_at=None, exit_code=None,
+        log_path=None, output_run_id=None, created_by="gui",
+        error_message=None, slot="global",
+    ))
+    monkeypatch.setattr(
+        "nnunetv2.gui.jobs.reaper._wait_process_blocking",
+        lambda pid: None,
+    )
+    await asyncio.wait_for(run_reaper(gui_config, j.id, j.pid), timeout=5)
+    fetched = get_job(gui_config, j.id)
+    assert fetched.status == "unknown"
+    assert fetched.error_message and "re-attached" in fetched.error_message
+
+
+@pytest.mark.asyncio
 async def test_reaper_preserves_killed_status_after_stop(gui_config):
     """When /api/jobs/{id}/stop has already marked the row 'killed', the
     reaper must not rewrite that status to 'failed' based on the SIGTERM
