@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { createJobsStore } from '../lib/stores/jobs';
+  import JobActionsCell from './JobActionsCell.svelte';
 
   const jobs = createJobsStore();
   let s = $state(jobs.get());
@@ -45,8 +46,7 @@
   <p class="text-xs text-err">Failed to load jobs: {s.error.message}</p>
 {:else if s.data.length === 0}
   <p class="text-xs text-slate-500">
-    No jobs tracked. Phase 4 lets you launch trainings, preprocessing, and predict runs from the GUI;
-    until then the table only shows CLI-discovered in-flight jobs (none right now).
+    No jobs tracked. Launch a preprocess, training, or predict run from the corresponding tab.
   </p>
 {:else}
   <table class="w-full text-xs">
@@ -59,6 +59,7 @@
         <th class="text-left py-1 px-2">Exit</th>
         <th class="text-left py-1 px-2">Started</th>
         <th class="text-left py-1 px-2">Run / args</th>
+        <th class="text-left py-1 px-2">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -80,6 +81,9 @@
           <td class="py-1 px-2 text-slate-500">{fmtTs(j.started_at)}</td>
           <td class="py-1 px-2 text-slate-400 truncate max-w-md font-mono text-[10px]">
             {j.output_run_id ?? fmtArgs(j.args_json)}
+          </td>
+          <td class="py-1 px-2">
+            <JobActionsCell job={j} onChanged={() => jobs.load()} />
           </td>
         </tr>
       {/each}
