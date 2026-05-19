@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import PlainTextResponse
 
 from nnunetv2.gui.services.images import get_slice_png_cached
 from nnunetv2.gui.state.runs import Run, RunFilter, list_runs, get_run
@@ -76,6 +77,29 @@ def make_router() -> APIRouter:
         window = (window_lo, window_hi) if (window_lo is not None and window_hi is not None) else None
         png = get_slice_png_cached(str(match), axis=axis, index=slice, window=window)
         return Response(content=png, media_type="image/png")
+
+    @router.get("/{run_id:path}/metrics_history")
+    def metrics_history(run_id: str, request: Request) -> list[dict]:
+        cfg = request.app.state.gui_config
+        run = get_run(cfg, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+        from nnunetv2.gui.services.tb_tailer import read_all_metrics
+        return read_all_metrics(Path(run.output_folder) / "tensorboard")
+
+    @router.get("/{run_id:path}/log_tail", response_class=PlainTextResponse)
+    def log_tail(run_id: str, request: Request, bytes: int = 8192) -> str:
+        cfg = request.app.state.gui_config
+        run = get_run(cfg, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+        for log in Path(run.output_folder).glob("training_log_*.txt"):
+            size = log.stat().st_size
+            with log.open("rb") as f:
+                f.seek(max(0, size - bytes))
+                data = f.read()
+            return data.decode("utf-8", errors="replace")
+        return ""
 
     # Run IDs contain slashes — use path: converter to capture the full string.
     @router.get("/{run_id:path}", response_model=Run)
