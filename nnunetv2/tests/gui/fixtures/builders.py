@@ -186,6 +186,39 @@ def build_checkpoint(fold_dir: Path, name: str = "checkpoint_final.pth") -> Path
     return p
 
 
+def build_minimal_niigz(
+    target: Path,
+    *,
+    shape: tuple[int, int, int] = (8, 8, 8),
+    seed: int = 0,
+) -> Path:
+    """Write a tiny valid NIfTI to ``target``.
+
+    Uses nibabel + numpy if available; otherwise copies the checked-in
+    ``fixtures/data/tiny.nii.gz`` as a last-resort fallback. The shape
+    argument is honored only on the nibabel path; the checked-in fallback
+    is fixed-shape.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import numpy as np
+        import nibabel as nib
+    except ImportError:
+        src = Path(__file__).parent / "data" / "tiny.nii.gz"
+        if not src.is_file():
+            raise RuntimeError(
+                "nibabel unavailable and no fallback tiny.nii.gz checked in"
+            )
+        target.write_bytes(src.read_bytes())
+        return target
+
+    rng = np.random.default_rng(seed)
+    arr = (rng.random(shape) * 255).astype("float32")
+    img = nib.Nifti1Image(arr, affine=np.eye(4))
+    nib.save(img, str(target))
+    return target
+
+
 def build_inference_summary(
     out_dir: Path,
     *,
