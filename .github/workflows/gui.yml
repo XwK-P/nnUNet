@@ -47,8 +47,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Install nnunetv2 with gui extra
-        run: pip install -e ".[gui]" pytest
+      - name: Install nnunetv2 with gui + test extras
+        run: pip install -e ".[gui,gui-test]"
 
       - name: Run GUI backend tests
         run: pytest nnunetv2/tests/gui/ -v
@@ -108,8 +108,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Install nnunetv2 with gui + e2e extras
-        run: pip install -e ".[gui,gui-e2e]" pytest
+      - name: Install nnunetv2 with gui + e2e + test extras
+        run: pip install -e ".[gui,gui-test,gui-e2e]"
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
