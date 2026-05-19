@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 
 from nnunetv2.gui.config import GuiConfig
 from nnunetv2.gui.db import init_db
+from nnunetv2.gui.jobs.queue import JobQueue
+from nnunetv2.gui.jobs.reaper import attach_on_boot as reaper_attach
 from nnunetv2.gui.routers import dashboard as dashboard_router
 from nnunetv2.gui.routers import datasets as datasets_router
 from nnunetv2.gui.routers import jobs as jobs_router
@@ -35,6 +37,19 @@ def create_app(cfg: GuiConfig) -> FastAPI:
     )
     app.state.gui_config = cfg
     app.state.run_stream_hub = RunStreamHub()
+    app.state.job_queue = JobQueue(cfg)
+
+    @app.on_event("startup")
+    async def _attach_jobs_on_boot() -> None:
+        tasks = await reaper_attach(cfg)
+        app.state._boot_reaper_tasks = tasks
+
+    @app.on_event("shutdown")
+    async def _shutdown_jobs() -> None:
+        # Critical: do NOT terminate the subprocesses themselves.
+        # Just stop tailing/reaping — they continue under their detached pgid.
+        for t in getattr(app.state, "_boot_reaper_tasks", []):
+            t.cancel()
 
     app.include_router(system_router.make_router())
     app.include_router(datasets_router.make_router())
