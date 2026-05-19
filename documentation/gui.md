@@ -1,7 +1,7 @@
 # nnU-Net GUI Manager
 
 A browser-based experiment & dataset manager that wraps every `nnUNetv2_*` CLI command.
-Status: **Phase 5** — pure-GUI workflow end-to-end (browse, image viewer, live monitoring, job launching), plus multi-run **Compare** (overlay chart + sortable summary table + CSV export).
+Status: **Phase 6** — pure-GUI workflow end-to-end (browse, image viewer, live monitoring, job launching), multi-run **Compare** (overlay chart + sortable summary table + CSV export), and **Models** management (find_best, ensembling, postprocessing, export/import) plus a polished 3-pane Predict viewer.
 
 ## Install
 
@@ -38,7 +38,7 @@ Opens the GUI at http://127.0.0.1:8765 in your default browser.
 | `--results` | `$nnUNet_results` | Override the results root. |
 | `--open` | off | Open the GUI in the default browser after startup. |
 
-## What you can do today (after Phase 5)
+## What you can do today (after Phase 6)
 
 - Browse every dataset in `$nnUNet_raw` from the **Datasets** page.
 - Inspect any dataset's `plans.json` and `dataset_fingerprint.json`.
@@ -53,6 +53,8 @@ Opens the GUI at http://127.0.0.1:8765 in your default browser.
 - Restart-safe: killing the GUI server does not kill in-flight subprocesses. On the next launch, `attach_on_boot` rediscovers them by PID and resumes tailing.
 - Pick any N runs from **Compare**, overlay their training curves with metric/x-axis/smoothing controls.
 - Sort & filter the run-summary table; export to CSV for downstream analysis.
+- Browse and act on **Models**: export per-fold to zip, import from zip, queue `find_best_configuration` / `nnUNetv2_ensemble` / `nnUNetv2_apply_postprocessing` jobs from the UI.
+- Review predictions in a 3-pane viewer (input · GT · prediction) with overlay opacity, and inspect a sortable per-case Dice table.
 
 ## Manual verification (Phase 4)
 
@@ -84,5 +86,5 @@ The full design lives at [docs/superpowers/specs/2026-05-16-nnunet-gui-manager-d
 3. **Live monitoring (passive)** ✓ — SSE multiplexed stream, live curves (uPlot), log tail, image samples panel, read-only Jobs page, header active-job badge.
 4. **Job launching** ✓ — preprocess / train (multi-fold queue) / predict launched from the GUI; stop/cancel/restart actions in the Jobs page; GPU contention warning + CLI preview; restart-safe re-attach via PID probes on server boot.
 5. **Compare** ✓ — multi-run overlay chart (uPlot, with metric/x-axis/smoothing controls) + sortable RunSummary table with CSV export.
-6. **Inference polish + Models** — find_best_configuration, ensembling, export/import.
+6. **Inference polish + Models** ✓ — 3-pane viewer, per-case metrics, find_best, ensembling, postprocessing, export/import.
 7. **Polish & system** — settings, notifications, e2e, integration test.
