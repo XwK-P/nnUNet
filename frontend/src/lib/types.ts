@@ -70,3 +70,48 @@ export interface Prediction {
   case_id: string;
   path: string;
 }
+
+export interface MetricEvent {
+  kind: 'metric';
+  key: string;
+  step: number;
+  value: number;
+  wall_time: number;
+}
+
+export interface LogEvent {
+  kind: 'log';
+  line: string;
+  ts: number;
+}
+
+export interface ImageSampleEvent {
+  kind: 'image_sample';
+  tag: string;
+  step: number;
+  url?: string;
+}
+
+export interface RunStatusEvent {
+  kind: 'status';
+  phase: string;
+  message?: string;
+}
+
+export type RunEvent = MetricEvent | LogEvent | ImageSampleEvent | RunStatusEvent;
+
+export interface Job {
+  id: number;
+  kind: string;
+  args_json: string;
+  pid: number | null;
+  pgid: number | null;
+  status: string;
+  started_at: string | null;
+  ended_at: string | null;
+  exit_code: number | null;
+  log_path: string | null;
+  output_run_id: string | null;
+  created_by: string | null;
+  error_message: string | null;
+}
