@@ -49,7 +49,7 @@ class PredictRequest(BaseModel):
     step_size: float = 0.5
     disable_tta: bool = False
     save_probabilities: bool = False
-    continue_prediction: bool = False  # -c
+    continue_prediction: bool = False  # --continue_prediction
     device: str = "cuda"
 
 
@@ -117,7 +117,7 @@ def render_predict(req: PredictRequest) -> list[str]:
     if req.save_probabilities:
         argv.append("--save_probabilities")
     if req.continue_prediction:
-        argv.append("-c")
+        argv.append("--continue_prediction")
     if req.device != "cuda":
         argv += ["-device", req.device]
     return argv

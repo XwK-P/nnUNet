@@ -106,6 +106,21 @@ def test_render_predict_checkpoint_and_step_size():
     assert "-step_size" in argv and "0.25" in argv
 
 
+def test_render_predict_continue_uses_long_flag():
+    # `-c` is the required configuration arg of nnUNetv2_predict, so resume
+    # must use the long --continue_prediction flag and never emit a bare -c
+    # after the configuration value is already on the line.
+    req = PredictRequest(dataset_id=27, configuration="3d_fullres",
+                          input_folder="/in", output_folder="/out",
+                          continue_prediction=True)
+    argv = render_predict(req)
+    assert "--continue_prediction" in argv
+    # The only -c occurrence is the (configuration) arg, paired with 3d_fullres.
+    assert argv.count("-c") == 1
+    c_idx = argv.index("-c")
+    assert argv[c_idx + 1] == "3d_fullres"
+
+
 def test_argv_to_cli_string_quotes_paths():
     s = argv_to_cli_string(["nnUNetv2_predict", "-i", "/a path/with space", "-o", "/o"])
     assert "'/a path/with space'" in s or '"/a path/with space"' in s
