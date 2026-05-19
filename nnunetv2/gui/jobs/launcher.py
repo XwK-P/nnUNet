@@ -47,15 +47,21 @@ def spawn(
         created_by="gui", error_message=None, slot=slot,
     ))
     try:
+        # The child inherits a dup of log_fh as stdout; close the parent's
+        # reference right after Popen returns to avoid fd leaks across many
+        # launches.
         log_fh = open(log_path, "ab", buffering=0)
-        proc = subprocess.Popen(
-            argv,
-            env=env,
-            stdout=log_fh,
-            stderr=subprocess.STDOUT,
-            close_fds=True,
-            **_popen_kwargs(),
-        )
+        try:
+            proc = subprocess.Popen(
+                argv,
+                env=env,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                **_popen_kwargs(),
+            )
+        finally:
+            log_fh.close()
         pgid = os.getpgid(proc.pid) if os.name == "posix" else proc.pid
         update_job_status(cfg, job.id, status="running", pid=proc.pid, pgid=pgid)
     except Exception as e:
