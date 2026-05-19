@@ -25,6 +25,11 @@ def make_router() -> APIRouter:
             nnunet_version = "unknown"
         return {"nnunetv2": nnunet_version, "gui": GUI_VERSION}
 
+    @router.get("/gpu")
+    def gpu() -> list[dict]:
+        from nnunetv2.gui.services.gpu import gpu_info
+        return gpu_info()
+
     @router.get("/diag")
     def diag(request: Request) -> dict:
         cfg = request.app.state.gui_config
