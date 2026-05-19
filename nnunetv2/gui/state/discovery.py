@@ -154,6 +154,36 @@ def scan_results_runs(results_root: Path) -> list[DiscoveredRun]:
     return out
 
 
+def scan_active_runs(cfg) -> list[DiscoveredRun]:
+    """Return runs that look in-flight.
+
+    Heuristic: no `checkpoint_final.pth` but a `tensorboard/` directory exists
+    and was touched in the last 10 minutes. Used by Phase 3 (read-only) to
+    surface CLI-launched trainings on the Monitor route; Phase 4 will rely on
+    the launcher's own job rows instead.
+    """
+    import time
+
+    now = time.time()
+    cutoff = 10 * 60  # seconds
+    out: list[DiscoveredRun] = []
+    for r in scan_results_runs(cfg.results):
+        fold_dir = Path(r.output_folder)
+        if (fold_dir / "checkpoint_final.pth").is_file():
+            continue
+        tb = fold_dir / "tensorboard"
+        if not tb.is_dir():
+            continue
+        try:
+            mtime = tb.stat().st_mtime
+        except OSError:
+            continue
+        if now - mtime > cutoff:
+            continue
+        out.append(r)
+    return out
+
+
 def reconcile(cfg) -> None:
     """One-shot scan of raw + preprocessed + results, upserting all records.
 
