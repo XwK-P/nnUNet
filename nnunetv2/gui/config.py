@@ -64,3 +64,17 @@ class GuiConfig:
 def _from_env(name: str) -> Optional[Path]:
     val = os.environ.get(name)
     return Path(val) if val else None
+
+
+# Allowlist of nnUNet-related env vars surfaced in the Settings UI.
+EDITABLE_ENV_VARS: tuple[str, ...] = (
+    "nnUNet_raw",
+    "nnUNet_preprocessed",
+    "nnUNet_results",
+    "nnUNet_def_n_proc",
+    "nnUNet_n_proc_DA",
+    "nnUNet_tb_logdir",
+    "nnUNet_wandb_enabled",
+    "nnUNet_tb_image_every_n_epochs",
+    "nnUNet_compile",
+)
