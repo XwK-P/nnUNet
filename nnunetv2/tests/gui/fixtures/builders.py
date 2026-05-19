@@ -81,7 +81,7 @@ def build_run(
     (base / "plans.json").write_text(json.dumps(plans or {"plans_name": plans_name, "configurations": {configuration: {}}}))
     (base / "dataset.json").write_text(json.dumps(dataset_json or {"channel_names": {"0": "CT"}, "labels": {"background": 0, "foreground": 1}}))
     if completed:
-        (fold_dir / "checkpoint_final.pth").write_bytes(b"")
+        (fold_dir / "checkpoint_final.pth").write_bytes(b"\0" * 128)
         (fold_dir / "validation").mkdir(exist_ok=True)
         (fold_dir / "validation" / "summary.json").write_text(json.dumps({"foreground_mean": {"Dice": 0.9}}))
     canonical_id = f"{dataset_folder}/{plans_name}__{trainer_name}__{configuration}/fold_{fold}"
@@ -176,3 +176,32 @@ def build_run_summary(
         ]
     (val_dir / "summary.json").write_text(json.dumps(payload))
     return val_dir / "summary.json"
+
+
+def build_checkpoint(fold_dir: Path, name: str = "checkpoint_final.pth") -> Path:
+    """Touch a checkpoint file with non-zero size so size reads work."""
+    fold_dir.mkdir(parents=True, exist_ok=True)
+    p = fold_dir / name
+    p.write_bytes(b"\0" * 128)
+    return p
+
+
+def build_inference_summary(
+    out_dir: Path,
+    *,
+    per_case: dict[str, float] | None = None,
+    foreground_mean_dice: float | None = None,
+) -> Path:
+    """Write a summary.json alongside prediction outputs (mirrors validation/summary.json shape)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload: dict = {}
+    if foreground_mean_dice is not None:
+        payload["foreground_mean"] = {"Dice": foreground_mean_dice}
+    if per_case:
+        payload["metric_per_case"] = [
+            {"reference_file": cid, "metrics": {"1": {"Dice": d}}}
+            for cid, d in per_case.items()
+        ]
+    p = out_dir / "summary.json"
+    p.write_text(json.dumps(payload))
+    return p
