@@ -94,21 +94,31 @@
 
 <div class="bg-bg-soft border border-border-soft rounded p-3">
   <div class="flex items-center gap-3 mb-2 text-[11px]">
-    <label class="text-slate-500">metric</label>
-    <select class="bg-bg-panel border border-border-soft rounded px-2 py-0.5 text-slate-200"
-            bind:value={metricKey}>
-      {#each allKeys() as k}
-        <option value={k}>{k}</option>
-      {/each}
-    </select>
-    <label class="text-slate-500">x-axis</label>
-    <select class="bg-bg-panel border border-border-soft rounded px-2 py-0.5 text-slate-200"
-            bind:value={xAxis}>
-      <option value="epoch">epoch</option>
-      <option value="wall_time">wall_time</option>
-    </select>
-    <label class="text-slate-500">smoothing</label>
-    <input type="range" min="0" max="0.95" step="0.05" bind:value={smoothing} />
+    <label class="text-slate-500 flex items-center gap-2">
+      metric
+      <select
+        class="bg-bg-panel border border-border-soft rounded px-2 py-0.5 text-slate-200"
+        bind:value={metricKey}
+      >
+        {#each allKeys() as k}
+          <option value={k}>{k}</option>
+        {/each}
+      </select>
+    </label>
+    <label class="text-slate-500 flex items-center gap-2">
+      x-axis
+      <select
+        class="bg-bg-panel border border-border-soft rounded px-2 py-0.5 text-slate-200"
+        bind:value={xAxis}
+      >
+        <option value="epoch">epoch</option>
+        <option value="wall_time">wall_time</option>
+      </select>
+    </label>
+    <label class="text-slate-500 flex items-center gap-2">
+      smoothing
+      <input type="range" min="0" max="0.95" step="0.05" bind:value={smoothing} />
+    </label>
     <span class="text-slate-400">{smoothing.toFixed(2)}</span>
   </div>
 
