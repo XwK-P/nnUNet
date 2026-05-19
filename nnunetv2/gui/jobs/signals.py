@@ -30,11 +30,20 @@ def kill_group(pgid: int) -> None:
 
 
 def is_alive(pgid: int) -> bool:
-    """Return True if pgid still has at least one live process."""
+    """Return True if pgid still has at least one live process.
+
+    On POSIX we probe the whole process group with killpg(pgid, 0) so the
+    answer stays accurate when the group leader exits before its children
+    (e.g. a torchrun-style training that has launched DDP workers). On
+    Windows there is no pgid concept; we fall back to a single-pid probe.
+    """
     if pgid is None or pgid <= 0:
         return False
     try:
-        os.kill(pgid, 0)
+        if os.name == "posix":
+            os.killpg(pgid, 0)
+        else:
+            os.kill(pgid, 0)
         return True
     except (ProcessLookupError, PermissionError):
         return False
