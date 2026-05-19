@@ -19,6 +19,7 @@ from nnunetv2.gui.routers import monitor as monitor_router
 from nnunetv2.gui.routers import preprocess as preprocess_router
 from nnunetv2.gui.routers import runs as runs_router
 from nnunetv2.gui.routers import system as system_router
+from nnunetv2.gui.routers import train as train_router
 from nnunetv2.gui.services.sse import RunStreamHub
 from nnunetv2.gui.state.discovery import reconcile
 
@@ -59,6 +60,7 @@ def create_app(cfg: GuiConfig) -> FastAPI:
     app.include_router(monitor_router.make_router())
     app.include_router(jobs_router.make_router())
     app.include_router(preprocess_router.make_router())
+    app.include_router(train_router.make_router())
 
     is_loopback = cfg.host in ("127.0.0.1", "localhost", "::1")
 
