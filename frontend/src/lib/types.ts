@@ -212,3 +212,77 @@ export interface CompareResponse {
   metrics: RunMetricSeries[];
   summaries: RunSummary[];
 }
+
+export interface Checkpoint {
+  name: string;
+  path: string;
+  size_bytes: number;
+}
+
+export interface ModelFold {
+  fold: string;
+  output_folder: string;
+  status: string;
+  checkpoints: Checkpoint[];
+}
+
+export interface Model {
+  id: string;
+  dataset_id: string;
+  plans_name: string;
+  trainer_name: string;
+  configuration: string;
+  folds: ModelFold[];
+}
+
+export interface PerCaseMetric {
+  case_id: string;
+  dice: number | null;
+}
+
+export interface PerCaseMetricsResponse {
+  foreground_mean_dice: number | null;
+  cases: PerCaseMetric[];
+}
+
+export interface FindBestConfigRequest {
+  dataset_id: number;
+  plans?: string[];
+  configurations?: string[];
+  trainers?: string[];
+  folds?: string[];
+  disable_ensembling?: boolean;
+  no_overwrite?: boolean;
+  num_processes?: number;
+}
+
+export interface EnsembleRequest {
+  input_folders: string[];
+  output_folder: string;
+  save_npz?: boolean;
+  num_processes?: number;
+}
+
+export interface PostprocRequest {
+  input_folder: string;
+  output_folder: string;
+  pp_pkl_file: string;
+  plans_json?: string;
+  dataset_json?: string;
+  num_processes?: number;
+}
+
+export interface ExportModelRequest {
+  dataset_id: number;
+  output_zip: string;
+  configurations?: string[];
+  folds?: string[];
+  trainer?: string;
+  plans?: string;
+  checkpoints?: string[];
+  export_cv_preds?: boolean;
+}
+
+export interface ImportModelRequest {
+  zip_path: string;
+}

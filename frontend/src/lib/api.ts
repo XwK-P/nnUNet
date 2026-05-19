@@ -74,7 +74,14 @@ import type {
   Case,
   CompareResponse,
   Dataset,
+  EnsembleRequest,
+  ExportModelRequest,
+  FindBestConfigRequest,
   GpuInfo,
+  ImportModelRequest,
+  Model,
+  PerCaseMetricsResponse,
+  PostprocRequest,
   Prediction,
   PredictLaunchResponse,
   PredictRequest,
@@ -114,6 +121,22 @@ export const endpoints = {
     const q = params.toString();
     return api.get<CompareResponse>(`/api/compare${q ? `?${q}` : ''}`);
   },
+  getModels: (): Promise<Model[]> => api.get<Model[]>('/api/models'),
+  getModel: (id: string): Promise<Model> => api.get<Model>(`/api/models/${id}`),
+  getPerCaseMetrics: (predictionFolder: string): Promise<PerCaseMetricsResponse> =>
+    api.get<PerCaseMetricsResponse>(
+      `/api/predict/per_case_metrics?prediction_folder=${encodeURIComponent(predictionFolder)}`,
+    ),
+  postExportModel: (req: ExportModelRequest): Promise<{ job_id: number }> =>
+    api.post<{ job_id: number }>('/api/models/export', req),
+  postImportModel: (req: ImportModelRequest): Promise<{ job_id: number }> =>
+    api.post<{ job_id: number }>('/api/models/import', req),
+  postFindBest: (req: FindBestConfigRequest): Promise<{ job_id: number }> =>
+    api.post<{ job_id: number }>('/api/models/find_best', req),
+  postEnsemble: (req: EnsembleRequest): Promise<{ job_id: number }> =>
+    api.post<{ job_id: number }>('/api/models/ensemble', req),
+  postPostproc: (req: PostprocRequest): Promise<{ job_id: number }> =>
+    api.post<{ job_id: number }>('/api/postproc/apply', req),
 };
 
 export const imageEndpoints = {
