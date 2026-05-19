@@ -8,10 +8,12 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from nnunetv2.gui.services.cli_renderer import (
+    EnsembleRequest,
     ExportModelRequest,
     FindBestConfigRequest,
     ImportModelRequest,
     argv_to_cli_string,
+    render_ensemble,
     render_export_model,
     render_find_best,
     render_import_model,
@@ -64,6 +66,19 @@ def make_router() -> APIRouter:
         log_path = str(Path(cfg.results) / ".nnunet_gui" / "logs"
                        / f"find_best_d{req.dataset_id}.log")
         j = await q.enqueue(kind="find_best", argv=argv, env=os.environ.copy(),
+                            log_path=log_path)
+        return {"job_id": j.id, "argv": argv, "cli": cli}
+
+    @router.post("/ensemble", status_code=status.HTTP_201_CREATED)
+    async def ensemble(req: EnsembleRequest, request: Request, dry_run: bool = False) -> dict:
+        argv = render_ensemble(req)
+        cli = argv_to_cli_string(argv)
+        if dry_run:
+            return JSONResponse(status_code=200, content={"argv": argv, "cli": cli})
+        cfg = request.app.state.gui_config
+        q = request.app.state.job_queue
+        log_path = str(Path(cfg.results) / ".nnunet_gui" / "logs" / "ensemble.log")
+        j = await q.enqueue(kind="ensemble", argv=argv, env=os.environ.copy(),
                             log_path=log_path)
         return {"job_id": j.id, "argv": argv, "cli": cli}
 

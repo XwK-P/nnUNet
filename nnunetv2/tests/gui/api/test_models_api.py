@@ -104,3 +104,20 @@ def test_find_best_enqueue(models_client):
                             json={"dataset_id": 27})
     assert r.status_code == 201
     assert "job_id" in r.json()
+
+
+def test_ensemble_dry_run(models_client):
+    r = models_client.post("/api/models/ensemble?dry_run=true",
+                            json={"input_folders": ["/a", "/b"], "output_folder": "/out"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["argv"][0] == "nnUNetv2_ensemble"
+    i_idx = body["argv"].index("-i")
+    assert body["argv"][i_idx + 1 : i_idx + 3] == ["/a", "/b"]
+
+
+def test_ensemble_enqueue(models_client):
+    r = models_client.post("/api/models/ensemble",
+                            json={"input_folders": ["/a", "/b"], "output_folder": "/out"})
+    assert r.status_code == 201
+    assert "job_id" in r.json()
