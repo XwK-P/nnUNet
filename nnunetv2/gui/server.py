@@ -18,6 +18,7 @@ from nnunetv2.gui.routers import datasets as datasets_router
 from nnunetv2.gui.routers import jobs as jobs_router
 from nnunetv2.gui.routers import models as models_router
 from nnunetv2.gui.routers import monitor as monitor_router
+from nnunetv2.gui.routers import postproc as postproc_router
 from nnunetv2.gui.routers import predict as predict_router
 from nnunetv2.gui.routers import preprocess as preprocess_router
 from nnunetv2.gui.routers import runs as runs_router
@@ -67,6 +68,7 @@ def create_app(cfg: GuiConfig) -> FastAPI:
     app.include_router(predict_router.make_router())
     app.include_router(compare_router.make_router())
     app.include_router(models_router.make_router())
+    app.include_router(postproc_router.make_router())
 
     is_loopback = cfg.host in ("127.0.0.1", "localhost", "::1")
 
