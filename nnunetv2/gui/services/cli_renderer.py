@@ -125,3 +125,110 @@ def render_predict(req: PredictRequest) -> list[str]:
 
 def argv_to_cli_string(argv: list[str]) -> str:
     return " ".join(shlex.quote(a) for a in argv)
+
+
+class FindBestConfigRequest(BaseModel):
+    dataset_id: int
+    plans: Optional[list[str]] = None
+    configurations: Optional[list[str]] = None
+    trainers: Optional[list[str]] = None
+    folds: Optional[list[str]] = None
+    disable_ensembling: bool = False
+    no_overwrite: bool = False
+    num_processes: Optional[int] = None
+
+
+class EnsembleRequest(BaseModel):
+    input_folders: list[str]
+    output_folder: str
+    save_npz: bool = False
+    num_processes: Optional[int] = None
+
+
+class PostprocRequest(BaseModel):
+    input_folder: str
+    output_folder: str
+    pp_pkl_file: str
+    plans_json: Optional[str] = None
+    dataset_json: Optional[str] = None
+    num_processes: Optional[int] = None
+
+
+class ExportModelRequest(BaseModel):
+    dataset_id: int
+    output_zip: str
+    configurations: Optional[list[str]] = None
+    folds: Optional[list[str]] = None
+    trainer: Optional[str] = None
+    plans: Optional[str] = None
+    checkpoints: Optional[list[str]] = None
+    export_cv_preds: bool = False
+
+
+class ImportModelRequest(BaseModel):
+    zip_path: str
+
+
+def render_find_best(req: FindBestConfigRequest) -> list[str]:
+    argv: list[str] = ["nnUNetv2_find_best_configuration", str(req.dataset_id)]
+    if req.plans:
+        argv += ["-p", *req.plans]
+    if req.configurations:
+        argv += ["-c", *req.configurations]
+    if req.trainers:
+        argv += ["-tr", *req.trainers]
+    if req.folds:
+        argv += ["-f", *req.folds]
+    if req.num_processes is not None:
+        argv += ["-np", str(req.num_processes)]
+    if req.disable_ensembling:
+        argv.append("--disable_ensembling")
+    if req.no_overwrite:
+        argv.append("--no_overwrite")
+    return argv
+
+
+def render_ensemble(req: EnsembleRequest) -> list[str]:
+    argv: list[str] = ["nnUNetv2_ensemble", "-i", *req.input_folders, "-o", req.output_folder]
+    if req.num_processes is not None:
+        argv += ["-np", str(req.num_processes)]
+    if req.save_npz:
+        argv.append("--save_npz")
+    return argv
+
+
+def render_postproc(req: PostprocRequest) -> list[str]:
+    argv: list[str] = [
+        "nnUNetv2_apply_postprocessing",
+        "-i", req.input_folder,
+        "-o", req.output_folder,
+        "-pp_pkl_file", req.pp_pkl_file,
+    ]
+    if req.plans_json:
+        argv += ["-plans_json", req.plans_json]
+    if req.dataset_json:
+        argv += ["-dataset_json", req.dataset_json]
+    if req.num_processes is not None:
+        argv += ["-np", str(req.num_processes)]
+    return argv
+
+
+def render_export_model(req: ExportModelRequest) -> list[str]:
+    argv: list[str] = ["nnUNetv2_export_model_to_zip", "-d", str(req.dataset_id), "-o", req.output_zip]
+    if req.configurations:
+        argv += ["-c", *req.configurations]
+    if req.trainer:
+        argv += ["-tr", req.trainer]
+    if req.plans:
+        argv += ["-p", req.plans]
+    if req.folds:
+        argv += ["-f", *req.folds]
+    if req.checkpoints:
+        argv += ["-chk", *req.checkpoints]
+    if req.export_cv_preds:
+        argv.append("--exp_cv_preds")
+    return argv
+
+
+def render_import_model(req: ImportModelRequest) -> list[str]:
+    return ["nnUNetv2_install_pretrained_model_from_zip", req.zip_path]
