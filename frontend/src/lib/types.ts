@@ -184,3 +184,31 @@ export interface TrainLaunchResponse {
 export interface PredictLaunchResponse extends CliPreviewLine {
   job_id?: number;
 }
+
+export interface MetricPoint {
+  step: number;
+  value: number;
+  wall_time: number | null;
+}
+
+export interface RunMetricSeries {
+  run_id: string;
+  series: Record<string, MetricPoint[]>;
+}
+
+export interface RunSummary {
+  run_id: string;
+  dataset_id: string;
+  plans_name: string;
+  trainer_name: string;
+  configuration: string;
+  fold: string;
+  status: string;
+  foreground_mean_dice: number | null;
+  per_class_dice: Record<string, number> | null;
+}
+
+export interface CompareResponse {
+  metrics: RunMetricSeries[];
+  summaries: RunSummary[];
+}

@@ -72,6 +72,7 @@ export const api = {
 
 import type {
   Case,
+  CompareResponse,
   Dataset,
   GpuInfo,
   Prediction,
@@ -106,6 +107,13 @@ export const endpoints = {
     api.get<Run[]>(`/api/runs${qs(filter as Record<string, string | undefined>)}`),
   getRun: (id: string) => api.get<Run>(`/api/runs/${id}`),
   getDashboard: () => api.get<DashboardData>('/api/dashboard'),
+  getCompare: (runIds: string[], metricKeys?: string[]) => {
+    const params = new URLSearchParams();
+    for (const r of runIds) params.append('run_ids', r);
+    if (metricKeys) for (const k of metricKeys) params.append('metric_keys', k);
+    const q = params.toString();
+    return api.get<CompareResponse>(`/api/compare${q ? `?${q}` : ''}`);
+  },
 };
 
 export const imageEndpoints = {
