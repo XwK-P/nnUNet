@@ -52,6 +52,20 @@ Opens the GUI at http://127.0.0.1:8765 in your default browser.
 - Open the **Jobs** page for a list of all tracked jobs with per-row **stop / cancel / restart** actions. Stop sends SIGTERM (5 s grace) then SIGKILL to the detached process group. The header badge shows a live count of active jobs and links to the page.
 - Restart-safe: killing the GUI server does not kill in-flight subprocesses. On the next launch, `attach_on_boot` rediscovers them by PID and resumes tailing.
 
+## Manual verification (Phase 4)
+
+Before declaring Phase 4 fully done on a fresh box, run through the checklist below against a real `nnUNet_raw/Dataset004_Hippocampus` (or similar):
+
+1. Datasets → Dataset004 → click **Preprocess** with default planner; confirm Jobs page shows a `running` row that transitions to `completed`.
+2. After preprocess completes: Train tab → 3d_fullres + folds `[0, 1]` → **Launch 2 folds**; fold_0 runs while fold_1 sits `queued`, then fold_1 starts after fold_0 finishes.
+3. On fold_1, hit **stop**; row turns `killed` within 6 s.
+4. After fold_0 completes: Predict tab → fill input/output folders → **Launch**; prediction completes and the Predict route shows the per-case viewer.
+5. Header active-job badge updates throughout.
+6. `pkill -f uvicorn` while a training is running and re-launch `nnUNetv2_gui`:
+   - the training subprocess is still alive in `ps`;
+   - the Jobs page shows it as `running` after re-boot;
+   - the Monitor curves resume tailing.
+
 ## Security
 
 The server binds to `127.0.0.1` and requires no authentication by default. Binding to a non-loopback host requires `--token <hex>`, which becomes the bearer token required on every request.
