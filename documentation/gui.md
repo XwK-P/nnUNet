@@ -1,7 +1,7 @@
 # nnU-Net GUI Manager
 
 A browser-based experiment & dataset manager that wraps every `nnUNetv2_*` CLI command.
-Status: **Phase 3** — read-only browse, image viewer, and live passive monitoring (SSE-streamed training metrics, log tail, image samples, and a read-only Jobs page). Subsequent phases add training launches and prediction.
+Status: **Phase 4** — pure-GUI workflow end-to-end. Browse, image viewer, live monitoring, and job launching (preprocess / train (multi-fold queue) / predict) with stop/cancel/restart actions and a GPU contention warning.
 
 ## Install
 
@@ -38,17 +38,19 @@ Opens the GUI at http://127.0.0.1:8765 in your default browser.
 | `--results` | `$nnUNet_results` | Override the results root. |
 | `--open` | off | Open the GUI in the default browser after startup. |
 
-## What you can do today (after Phase 3)
+## What you can do today (after Phase 4)
 
 - Browse every dataset in `$nnUNet_raw` from the **Datasets** page.
 - Inspect any dataset's `plans.json` and `dataset_fingerprint.json`.
+- **Preprocess** any dataset from a collapsible panel on the Datasets page; the panel previews the equivalent `nnUNetv2_plan_and_preprocess …` command before launch.
 - Browse every training run in `$nnUNet_results` from the **Monitor** page.
 - Use the **Workspace** switcher in the header to scope downstream pages to a single dataset.
 - See aggregate stats and recent runs on the **Dashboard**.
 - Watch a run live: SSE-streamed metric curves (uPlot), tailed training log, and TB image-sample panel. Closed/completed runs replay their full history; running ones append in near real time.
-- Open the **Jobs** page for a read-only list of all tracked jobs (in-flight + historical). The header badge shows a live count of active jobs and links to the page.
-
-Phase 3 is still read-only — launching trainings, ensembling, and exports arrive in Phases 4–6.
+- **Launch trainings** from the **Train** tab — choose configuration, fold(s), trainer/plans, num_gpus, npz; multi-fold expands into N queued jobs that run serially.
+- **Launch predictions** from the **Predict** tab — input/output folders, configuration, fold(s) including `all` for ensemble, checkpoint, step size, TTA / save-probabilities flags, device.
+- Open the **Jobs** page for a list of all tracked jobs with per-row **stop / cancel / restart** actions. Stop sends SIGTERM (5 s grace) then SIGKILL to the detached process group. The header badge shows a live count of active jobs and links to the page.
+- Restart-safe: killing the GUI server does not kill in-flight subprocesses. On the next launch, `attach_on_boot` rediscovers them by PID and resumes tailing.
 
 ## Security
 
@@ -64,7 +66,7 @@ The full design lives at [docs/superpowers/specs/2026-05-16-nnunet-gui-manager-d
 1. **Read-only browse** ✓ — filesystem discovery, dataset/run lists, plans/fingerprint inspector, dashboard cards backed by historical data.
 2. **Image viewer** ✓ — NiiVue + PNG slice preview, case browser per dataset, prediction review per run.
 3. **Live monitoring (passive)** ✓ — SSE multiplexed stream, live curves (uPlot), log tail, image samples panel, read-only Jobs page, header active-job badge.
-4. **Job launching** — preprocess/train/predict.
+4. **Job launching** ✓ — preprocess / train (multi-fold queue) / predict launched from the GUI; stop/cancel/restart actions in the Jobs page; GPU contention warning + CLI preview; restart-safe re-attach via PID probes on server boot.
 5. **Compare** — multi-run overlay + table.
 6. **Inference polish + Models** — find_best_configuration, ensembling, export/import.
 7. **Polish & system** — settings, notifications, e2e, integration test.
