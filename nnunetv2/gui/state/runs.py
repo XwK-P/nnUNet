@@ -104,3 +104,26 @@ def upsert_run(cfg: GuiConfig, run: Run) -> None:
             )
         else:
             s.execute(run_table.insert().values(**values))
+
+
+def update_run_meta(
+    cfg: GuiConfig,
+    run_id: str,
+    *,
+    tags_json: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> Optional[Run]:
+    """Partial-update the GUI-only fields on a run. None means 'leave as-is'."""
+    existing = get_run(cfg, run_id)
+    if existing is None:
+        return None
+    values = {}
+    if tags_json is not None:
+        values["tags_json"] = tags_json
+    if notes is not None:
+        values["notes"] = notes
+    if not values:
+        return existing
+    with session_scope(cfg) as s:
+        s.execute(run_table.update().where(run_table.c.id == run_id).values(**values))
+    return get_run(cfg, run_id)

@@ -1,14 +1,21 @@
 """Runs router."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 
 from nnunetv2.gui.services.images import get_slice_png_cached
 from nnunetv2.gui.state.runs import Run, RunFilter, list_runs, get_run
+
+
+class RunUpdateRequest(BaseModel):
+    tags: Optional[list[str]] = None
+    notes: Optional[str] = None
 
 
 def make_router() -> APIRouter:
@@ -108,5 +115,15 @@ def make_router() -> APIRouter:
         if r is None:
             raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
         return r
+
+    @router.put("/{run_id:path}", response_model=Run)
+    def update_run(run_id: str, body: RunUpdateRequest, request: Request) -> Run:
+        from nnunetv2.gui.state.runs import update_run_meta
+        cfg = request.app.state.gui_config
+        tags_json = json.dumps(body.tags) if body.tags is not None else None
+        result = update_run_meta(cfg, run_id, tags_json=tags_json, notes=body.notes)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+        return result
 
     return router
