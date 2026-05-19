@@ -102,8 +102,41 @@ def test_render_predict_checkpoint_and_step_size():
                           input_folder="/in", output_folder="/out",
                           checkpoint="checkpoint_best", step_size=0.25)
     argv = render_predict(req)
-    assert "-chk" in argv and "checkpoint_best" in argv
+    # Renderer .pth-normalizes the checkpoint filename so the CLI can
+    # resolve it; see test_render_predict_checkpoint_normalizes_to_pth.
+    assert "-chk" in argv and "checkpoint_best.pth" in argv
     assert "-step_size" in argv and "0.25" in argv
+
+
+def test_render_predict_checkpoint_normalizes_to_pth():
+    # nnUNetv2_predict's -chk wants a filename. The form passes the bare
+    # stem ("checkpoint_best"); the renderer must append .pth.
+    req = PredictRequest(dataset_id=27, configuration="3d_fullres",
+                          input_folder="/in", output_folder="/out",
+                          checkpoint="checkpoint_best")
+    argv = render_predict(req)
+    chk_idx = argv.index("-chk")
+    assert argv[chk_idx + 1] == "checkpoint_best.pth"
+
+
+def test_render_predict_checkpoint_passes_through_explicit_pth_suffix():
+    # If the caller already supplied the .pth suffix, leave it alone.
+    req = PredictRequest(dataset_id=27, configuration="3d_fullres",
+                          input_folder="/in", output_folder="/out",
+                          checkpoint="checkpoint_best.pth")
+    argv = render_predict(req)
+    chk_idx = argv.index("-chk")
+    assert argv[chk_idx + 1] == "checkpoint_best.pth"
+
+
+def test_render_predict_skips_chk_for_default_filename_variants():
+    # Either "checkpoint_final" or the .pth-suffixed form means "use CLI default".
+    for value in ("checkpoint_final", "checkpoint_final.pth"):
+        req = PredictRequest(dataset_id=27, configuration="3d_fullres",
+                              input_folder="/in", output_folder="/out",
+                              checkpoint=value)
+        argv = render_predict(req)
+        assert "-chk" not in argv, f"should not emit -chk for default value {value!r}"
 
 
 def test_render_predict_continue_uses_long_flag():

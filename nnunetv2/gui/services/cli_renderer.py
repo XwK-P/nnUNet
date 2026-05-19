@@ -108,8 +108,12 @@ def render_predict(req: PredictRequest) -> list[str]:
         argv += ["-tr", req.trainer]
     if req.plans:
         argv += ["-p", req.plans]
-    if req.checkpoint != "checkpoint_final":
-        argv += ["-chk", req.checkpoint]
+    # nnUNetv2_predict's -chk expects a filename (default checkpoint_final.pth).
+    # Accept either "checkpoint_best" or "checkpoint_best.pth" from the form
+    # and emit the .pth-suffixed form so the CLI can resolve it.
+    if req.checkpoint not in ("checkpoint_final", "checkpoint_final.pth"):
+        chk = req.checkpoint if req.checkpoint.endswith(".pth") else req.checkpoint + ".pth"
+        argv += ["-chk", chk]
     if req.step_size != 0.5:
         argv += ["-step_size", str(req.step_size)]
     if req.disable_tta:
