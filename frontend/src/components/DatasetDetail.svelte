@@ -6,12 +6,14 @@
   import FingerprintViewer from './FingerprintViewer.svelte';
   import CasesList from './CasesList.svelte';
   import CaseViewer from './CaseViewer.svelte';
+  import PreprocessForm from '../lib/forms/PreprocessForm.svelte';
 
   let { datasetId }: { datasetId: string } = $props();
 
   type Tab = 'cases' | 'plans' | 'fingerprint' | 'validation';
   let tab = $state<Tab>('cases');
   let selectedCase = $state<Case | null>(null);
+  let showPreprocess = $state(false);
 
   let s = $state<
     | { kind: 'idle' }
@@ -51,7 +53,21 @@
       {:else}
         <span class="text-xs bg-bg-panel text-slate-500 px-2 py-0.5 rounded">raw only</span>
       {/if}
+      {#if s.data.dataset_id_int !== null}
+        <button
+          type="button"
+          class="ml-auto text-xs px-2 py-0.5 bg-accent text-white rounded"
+          onclick={() => (showPreprocess = !showPreprocess)}
+        >
+          {showPreprocess ? 'Hide' : 'Preprocess'}
+        </button>
+      {/if}
     </div>
+    {#if showPreprocess && s.data.dataset_id_int !== null}
+      <div class="mt-3 pt-3 border-t border-border-soft">
+        <PreprocessForm datasetIdInt={s.data.dataset_id_int} />
+      </div>
+    {/if}
   </div>
 
   <div class="bg-bg-soft border border-border-soft rounded p-3">
