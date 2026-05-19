@@ -114,4 +114,73 @@ export interface Job {
   output_run_id: string | null;
   created_by: string | null;
   error_message: string | null;
+  slot?: string;
+}
+
+export interface PreprocessRequest {
+  dataset_id: number;
+  verify_dataset_integrity?: boolean;
+  planner?: string;
+  configurations?: string[];
+  no_pp?: boolean;
+  npfp?: number;
+  np?: number;
+}
+
+export interface TrainBatchRequest {
+  dataset_id: number;
+  configuration: string;
+  folds: string[];
+  trainer?: string;
+  plans?: string;
+  pretrained_weights?: string;
+  num_gpus?: number;
+  npz?: boolean;
+  continue_training?: boolean;
+  val_only?: boolean;
+  val_best?: boolean;
+  disable_checkpointing?: boolean;
+  device?: string;
+}
+
+export interface PredictRequest {
+  dataset_id: number;
+  configuration: string;
+  input_folder: string;
+  output_folder: string;
+  folds: string[];
+  trainer?: string;
+  plans?: string;
+  checkpoint?: string;
+  step_size?: number;
+  disable_tta?: boolean;
+  save_probabilities?: boolean;
+  continue_prediction?: boolean;
+  device?: string;
+}
+
+export interface GpuInfo {
+  index: number;
+  name: string;
+  memory_total_mb: number;
+  memory_used_mb: number;
+  util_pct: number;
+}
+
+export interface CliPreviewLine {
+  argv: string[];
+  cli: string;
+}
+
+export interface PreprocessLaunchResponse extends CliPreviewLine {
+  job_id?: number;
+}
+
+export interface TrainLaunchResponse {
+  jobs: CliPreviewLine[];
+  job_ids?: number[];
+}
+
+export interface PredictLaunchResponse extends CliPreviewLine {
+  job_id?: number;
 }

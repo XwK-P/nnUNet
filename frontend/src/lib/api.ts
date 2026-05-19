@@ -70,7 +70,21 @@ export const api = {
   },
 };
 
-import type { Case, Dataset, Prediction, Run, RunFilter, DashboardData } from './types';
+import type {
+  Case,
+  Dataset,
+  GpuInfo,
+  Prediction,
+  PredictLaunchResponse,
+  PredictRequest,
+  PreprocessLaunchResponse,
+  PreprocessRequest,
+  Run,
+  RunFilter,
+  DashboardData,
+  TrainBatchRequest,
+  TrainLaunchResponse,
+} from './types';
 
 function qs(params: Record<string, string | undefined>): string {
   const usp = new URLSearchParams();
@@ -132,4 +146,29 @@ export const imageEndpoints = {
     const q = new URLSearchParams({ axis: String(opts.axis), slice: String(opts.slice) });
     return `/api/runs/${runId}/predictions/${encodeURIComponent(caseId)}?${q}`;
   },
+};
+
+export const launchEndpoints = {
+  postPreprocess: (req: PreprocessRequest, dryRun = false): Promise<PreprocessLaunchResponse> =>
+    api.post<PreprocessLaunchResponse>(
+      `/api/preprocess${dryRun ? '?dry_run=true' : ''}`,
+      req,
+    ),
+  postTrain: (req: TrainBatchRequest, dryRun = false): Promise<TrainLaunchResponse> =>
+    api.post<TrainLaunchResponse>(
+      `/api/train${dryRun ? '?dry_run=true' : ''}`,
+      req,
+    ),
+  postPredict: (req: PredictRequest, dryRun = false): Promise<PredictLaunchResponse> =>
+    api.post<PredictLaunchResponse>(
+      `/api/predict${dryRun ? '?dry_run=true' : ''}`,
+      req,
+    ),
+  stopJob: (id: number): Promise<{ ok: boolean; status: string }> =>
+    api.post(`/api/jobs/${id}/stop`, {}),
+  cancelJob: (id: number): Promise<{ ok: boolean; status: string }> =>
+    api.post(`/api/jobs/${id}/cancel`, {}),
+  restartJob: (id: number): Promise<{ new_job_id: number }> =>
+    api.post(`/api/jobs/${id}/restart`, {}),
+  getGpuInfo: (): Promise<GpuInfo[]> => api.get<GpuInfo[]>('/api/system/gpu'),
 };
