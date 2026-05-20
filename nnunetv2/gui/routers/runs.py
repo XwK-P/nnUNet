@@ -47,6 +47,8 @@ def make_router() -> APIRouter:
     # Listing/preview must only surface segmentation files; otherwise the
     # case list grows duplicates and prediction_preview can pick a .npz or
     # JSON file first and fail to decode.
+    # _PRED_SUFFIXES is also the suffix-preference ordering: compressed
+    # NIfTI wins over uncompressed, then non-NIfTI formats by likelihood.
     _PRED_SUFFIXES = (".nii.gz", ".nii", ".nrrd", ".mha", ".tif", ".tiff", ".png")
 
     def _is_prediction_file(name: str) -> bool:
@@ -60,6 +62,16 @@ def make_router() -> APIRouter:
                 return name[: -len(suf)]
         return name.split(".")[0]
 
+    def _suffix_rank(name: str) -> int:
+        """Index into _PRED_SUFFIXES (lower is preferred). Non-prediction
+        names rank last so they never beat a real prediction file.
+        """
+        lower = name.lower()
+        for i, suf in enumerate(_PRED_SUFFIXES):
+            if lower.endswith(suf):
+                return i
+        return len(_PRED_SUFFIXES)
+
     # Prediction routes need to be declared BEFORE the catch-all `/{run_id:path}`
     # because FastAPI evaluates routes in declaration order; the path converter
     # would otherwise swallow the trailing /predictions[/...] segment.
@@ -72,11 +84,19 @@ def make_router() -> APIRouter:
         pred_dir = Path(run.output_folder) / "predictions"
         if not pred_dir.is_dir():
             return []
+        # Sort by (stem, suffix preference, name) so duplicate stems cluster
+        # and the preferred suffix (e.g. .nii.gz over .nii) wins the dedup.
+        # Plain `sorted()` would put 'case.nii' before 'case.nii.gz'
+        # because it is lexicographically shorter — the opposite of what
+        # we want when both formats live in the same predictions/ dir.
+        files = [
+            f for f in pred_dir.iterdir()
+            if f.is_file() and _is_prediction_file(f.name)
+        ]
+        files.sort(key=lambda f: (_strip_pred_suffix(f.name), _suffix_rank(f.name), f.name))
         seen_stems: set[str] = set()
         out: list[dict] = []
-        for f in sorted(pred_dir.iterdir()):
-            if not f.is_file() or not _is_prediction_file(f.name):
-                continue
+        for f in files:
             stem = _strip_pred_suffix(f.name)
             if stem in seen_stems:
                 continue
@@ -95,17 +115,19 @@ def make_router() -> APIRouter:
         if run is None:
             raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
         pred_dir = Path(run.output_folder) / "predictions"
-        # Find the segmentation file whose stem matches the requested case.
-        # Sort first so the result is deterministic when both .nii and .nii.gz
-        # exist (the longer suffix wins lexicographically and is preferred).
         match = None
         if pred_dir.is_dir():
-            for f in sorted(pred_dir.iterdir()):
-                if not f.is_file() or not _is_prediction_file(f.name):
-                    continue
-                if _strip_pred_suffix(f.name) == case_id:
-                    match = f
-                    break
+            candidates = [
+                f for f in pred_dir.iterdir()
+                if f.is_file()
+                and _is_prediction_file(f.name)
+                and _strip_pred_suffix(f.name) == case_id
+            ]
+            # Lower suffix rank wins (e.g. .nii.gz over .nii); ties are
+            # broken by filename so the result is deterministic.
+            candidates.sort(key=lambda f: (_suffix_rank(f.name), f.name))
+            if candidates:
+                match = candidates[0]
         if match is None:
             raise HTTPException(status_code=404, detail=f"No prediction for {case_id!r}")
         window = (window_lo, window_hi) if (window_lo is not None and window_hi is not None) else None

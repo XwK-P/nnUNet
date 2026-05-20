@@ -57,6 +57,49 @@ def test_predictions_on_unknown_run(client):
     assert r.status_code == 404
 
 
+def test_predictions_prefer_nii_gz_over_nii_for_duplicate_stems(
+    predictions_client, populated_nifti_paths
+):
+    """A predictions/ directory can contain both `case_001.nii` and
+    `case_001.nii.gz` (e.g. when the user inspects an older run and
+    nnUNet was re-run with a different file_ending). The list and
+    preview paths must deterministically prefer the compressed file —
+    naive lexicographic sort puts `.nii` first, which is the opposite of
+    what users expect.
+    """
+    pred_dir = (
+        populated_nifti_paths["results"]
+        / "Dataset027_ACDC"
+        / "nnUNetPlans__nnUNetTrainer__3d_fullres"
+        / "fold_0"
+        / "predictions"
+    )
+    # Build a real `.nii.gz` (already there from the fixture). Now drop a
+    # `.nii` sibling that would sort first lexicographically.
+    # The .nii is content-distinct so we could detect leakage if the
+    # wrong file were served — but we only need to assert the list
+    # surfaces the .nii.gz path.
+    sibling = pred_dir / "case_001.nii"
+    sibling.write_bytes(b"\x00" * 16)
+    r = predictions_client.get(
+        "/api/runs/Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0/predictions"
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["case_id"] == "case_001"
+    assert body[0]["path"].endswith(".nii.gz"), (
+        f"expected .nii.gz to win over .nii, got {body[0]['path']}"
+    )
+    # And preview opens the .nii.gz (the .nii is invalid bytes; if the
+    # router picked it instead the response would not be a 200 PNG).
+    r2 = predictions_client.get(
+        "/api/runs/Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0/predictions/case_001?axis=0&slice=0"
+    )
+    assert r2.status_code == 200
+    assert r2.headers["content-type"] == "image/png"
+
+
 def test_list_predictions_filters_non_segmentation_files(predictions_client, populated_nifti_paths):
     """A predictions/ directory may also contain non-segmentation files
     written alongside a normal predict run — JSON args dumps from
