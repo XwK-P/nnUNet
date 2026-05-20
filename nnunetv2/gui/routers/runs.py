@@ -41,6 +41,25 @@ def make_router() -> APIRouter:
         )
         return list_runs(request.app.state.gui_config, flt)
 
+    # The same predictions/ folder can hold non-segmentation artifacts:
+    # --save_probabilities writes .npz/.pkl/.npy siblings with the same stem,
+    # and nnUNet may drop predict_from_raw_data_args.json into the directory.
+    # Listing/preview must only surface segmentation files; otherwise the
+    # case list grows duplicates and prediction_preview can pick a .npz or
+    # JSON file first and fail to decode.
+    _PRED_SUFFIXES = (".nii.gz", ".nii", ".nrrd", ".mha", ".tif", ".tiff", ".png")
+
+    def _is_prediction_file(name: str) -> bool:
+        lower = name.lower()
+        return any(lower.endswith(suf) for suf in _PRED_SUFFIXES)
+
+    def _strip_pred_suffix(name: str) -> str:
+        lower = name.lower()
+        for suf in _PRED_SUFFIXES:
+            if lower.endswith(suf):
+                return name[: -len(suf)]
+        return name.split(".")[0]
+
     # Prediction routes need to be declared BEFORE the catch-all `/{run_id:path}`
     # because FastAPI evaluates routes in declaration order; the path converter
     # would otherwise swallow the trailing /predictions[/...] segment.
@@ -53,11 +72,15 @@ def make_router() -> APIRouter:
         pred_dir = Path(run.output_folder) / "predictions"
         if not pred_dir.is_dir():
             return []
+        seen_stems: set[str] = set()
         out: list[dict] = []
         for f in sorted(pred_dir.iterdir()):
-            if not f.is_file():
+            if not f.is_file() or not _is_prediction_file(f.name):
                 continue
-            stem = f.name.split(".")[0]
+            stem = _strip_pred_suffix(f.name)
+            if stem in seen_stems:
+                continue
+            seen_stems.add(stem)
             out.append({"case_id": stem, "path": str(f)})
         return out
 
@@ -72,11 +95,15 @@ def make_router() -> APIRouter:
         if run is None:
             raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
         pred_dir = Path(run.output_folder) / "predictions"
-        # Find the file with matching stem
+        # Find the segmentation file whose stem matches the requested case.
+        # Sort first so the result is deterministic when both .nii and .nii.gz
+        # exist (the longer suffix wins lexicographically and is preferred).
         match = None
         if pred_dir.is_dir():
-            for f in pred_dir.iterdir():
-                if f.is_file() and f.name.split(".")[0] == case_id:
+            for f in sorted(pred_dir.iterdir()):
+                if not f.is_file() or not _is_prediction_file(f.name):
+                    continue
+                if _strip_pred_suffix(f.name) == case_id:
                     match = f
                     break
         if match is None:

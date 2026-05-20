@@ -55,3 +55,38 @@ def test_prediction_preview_unknown_case(predictions_client):
 def test_predictions_on_unknown_run(client):
     r = client.get("/api/runs/Dataset999_X/x__y__z/fold_0/predictions")
     assert r.status_code == 404
+
+
+def test_list_predictions_filters_non_segmentation_files(predictions_client, populated_nifti_paths):
+    """A predictions/ directory may also contain non-segmentation files
+    written alongside a normal predict run — JSON args dumps from
+    nnUNet itself, and .npz/.pkl probability companions when the user
+    passes --save_probabilities. Listing must skip those so case rows
+    aren't duplicated and prediction_preview can't be sent a non-image
+    file to decode.
+    """
+    pred_dir = (
+        populated_nifti_paths["results"]
+        / "Dataset027_ACDC"
+        / "nnUNetPlans__nnUNetTrainer__3d_fullres"
+        / "fold_0"
+        / "predictions"
+    )
+    # Drop the kinds of file nnUNet writes as siblings of the .nii.gz output:
+    (pred_dir / "case_001.npz").write_bytes(b"PK\x03\x04")
+    (pred_dir / "case_001.pkl").write_bytes(b"\x80\x04")
+    (pred_dir / "predict_from_raw_data_args.json").write_text("{}")
+    r = predictions_client.get(
+        "/api/runs/Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0/predictions"
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert [row["case_id"] for row in body] == ["case_001"], (
+        f"expected only the segmentation case, got {body}"
+    )
+    # And the preview lookup still resolves the .nii.gz, not the .npz.
+    r2 = predictions_client.get(
+        "/api/runs/Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0/predictions/case_001?axis=0&slice=4"
+    )
+    assert r2.status_code == 200
+    assert r2.headers["content-type"] == "image/png"
