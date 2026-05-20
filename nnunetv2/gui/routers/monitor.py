@@ -32,10 +32,17 @@ def make_router() -> APIRouter:
         log_path = log_glob[0] if log_glob else None
 
         async def event_stream() -> AsyncIterator[str]:
-            # 1. Replay current metric history so the client gets full curves.
+            # 1. Replay current metric history so the client gets full curves,
+            #    and remember the last step per key so the live tail doesn't
+            #    re-emit them on its first poll.
             yield sse_format("status", {"phase": "replay_start"})
+            replayed_max_step: dict[str, int] = {}
             for m in read_all_metrics(tb_dir):
                 yield sse_format("metric", m)
+                k = m["key"]
+                step = m["step"]
+                if step > replayed_max_step.get(k, -1):
+                    replayed_max_step[k] = step
             yield sse_format("status", {"phase": "replay_done"})
 
             # 2. Live tail via two cooperating tasks. We push into a single queue.
@@ -44,7 +51,11 @@ def make_router() -> APIRouter:
 
             async def pump_metrics() -> None:
                 try:
-                    async for m in tail_metrics(tb_dir, poll_interval=1.0):
+                    async for m in tail_metrics(
+                        tb_dir,
+                        poll_interval=1.0,
+                        last_step_seen=dict(replayed_max_step),
+                    ):
                         if stop.is_set():
                             return
                         await q.put(("metric", m))

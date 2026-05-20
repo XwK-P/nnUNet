@@ -120,3 +120,68 @@ def test_live_metric_appears_in_sse(populated_paths, monkeypatch):
 
     assert new_step_written.is_set(), "background writer did not run"
     assert new_step_seen, "live metric (step=1) did not arrive via SSE within 10 s"
+
+
+def test_sse_replay_does_not_duplicate_into_live_tail(populated_paths, monkeypatch):
+    """Replay emits each (key, step) once; the live tail must not re-emit
+    the same steps on its first poll. Otherwise long-running monitor
+    sessions accumulate duplicate points and the client-side ring buffer
+    doubles up memory pressure.
+    """
+    from nnunetv2.tests.gui.fixtures.builders import build_tb_event_dir
+
+    fold_dir = (
+        populated_paths["results"]
+        / "Dataset027_ACDC"
+        / "nnUNetPlans__nnUNetTrainer__3d_fullres"
+        / "fold_0"
+    )
+    tb_dir = fold_dir / "tensorboard"
+    build_tb_event_dir(
+        tb_dir,
+        scalars={"train_loss": [(0, 1.0), (1, 0.7), (2, 0.5)]},
+    )
+
+    monkeypatch.setenv("nnUNet_raw", str(populated_paths["raw"]))
+    monkeypatch.setenv("nnUNet_preprocessed", str(populated_paths["preprocessed"]))
+    monkeypatch.setenv("nnUNet_results", str(populated_paths["results"]))
+
+    from nnunetv2.gui.config import GuiConfig
+    from nnunetv2.gui.server import create_app
+
+    port = _pick_port()
+    app = create_app(GuiConfig.from_env_and_args(host="127.0.0.1", port=port, token=None))
+    server = _ServerThread(app, port)
+    server.start()
+
+    seen: list[tuple[str, int]] = []
+    try:
+        run_id = "Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0"
+        url = f"http://127.0.0.1:{port}/sse/runs/{run_id}/events"
+        # Short per-read timeout: once replay drains we expect the live tail
+        # to stay silent (no new TB writes here), so the next read should
+        # block until our timeout fires, at which point we move on. Without
+        # this the connection would hang for the full 15s heartbeat interval.
+        with requests.get(url, stream=True, timeout=(5, 3)) as r:
+            assert r.status_code == 200
+            buf = ""
+            try:
+                for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
+                    if chunk:
+                        buf += chunk
+                        while "\n\n" in buf:
+                            raw, buf = buf.split("\n\n", 1)
+                            if raw.startswith("event: metric"):
+                                data = json.loads(raw.split("data: ", 1)[1])
+                                seen.append((data["key"], int(data["step"])))
+            except requests.exceptions.ConnectionError:
+                # Read timeout after the live tail goes idle — expected; means
+                # the server didn't emit duplicates while we were waiting.
+                pass
+    finally:
+        server.stop()
+
+    train_loss_steps = [step for k, step in seen if k == "train_loss"]
+    assert train_loss_steps == [0, 1, 2], (
+        f"replay should emit each step exactly once; got {train_loss_steps}"
+    )
