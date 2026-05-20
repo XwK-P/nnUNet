@@ -58,18 +58,30 @@ def slice_to_png(
 
     `window` is (low, high) intensity to map to (0, 255); when None, scale
     to the slice's min/max range.
+
+    2-D inputs are accepted and pad-promoted to 3-D with a trailing
+    singleton axis (matching what volume_shape reports to the slider),
+    so 2-D datasets render through the same code path as 3-D ones.
     """
+    if arr.ndim == 2:
+        # Treat a 2D image as a single-slice 3D volume along the new last axis.
+        arr = arr[..., np.newaxis]
     if arr.ndim != 3:
-        raise ValueError(f"expected 3-D array, got shape {arr.shape}")
+        raise ValueError(f"expected 2-D or 3-D array, got shape {arr.shape}")
+    if axis not in (0, 1, 2):
+        raise ValueError(f"axis must be 0, 1, or 2; got {axis}")
     idx = max(0, min(arr.shape[axis] - 1, int(index)))
     if axis == 0:
         sl = arr[idx, :, :]
     elif axis == 1:
         sl = arr[:, idx, :]
-    elif axis == 2:
-        sl = arr[:, :, idx]
     else:
-        raise ValueError(f"axis must be 0, 1, or 2; got {axis}")
+        sl = arr[:, :, idx]
+    # Squeeze any singleton axis from the 2D-promoted path so PIL gets a
+    # proper 2D array.
+    sl = np.squeeze(sl)
+    if sl.ndim == 1:
+        sl = sl[np.newaxis, :]
     if window is not None:
         lo, hi = window
     else:

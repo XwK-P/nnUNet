@@ -56,6 +56,26 @@ def test_lru_cache_returns_same_bytes(nifti_file):
     assert a is b  # cache returns the exact same bytes object
 
 
+def test_slice_to_png_accepts_2d_array():
+    """2D nnUNet datasets (and 2D probability maps) reach slice_to_png as
+    rank-2 arrays. The function must render them instead of 500'ing the
+    image preview endpoint.
+    """
+    arr = np.arange(16 * 8, dtype=np.float32).reshape(16, 8)
+    # axis=0 should give us the first column; axis=2 (the promoted singleton)
+    # should give us the whole image.
+    png0 = slice_to_png(arr, axis=0, index=4)
+    png_last = slice_to_png(arr, axis=2, index=0)
+    assert png0[:8] == b"\x89PNG\r\n\x1a\n"
+    assert png_last[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_slice_to_png_rejects_other_ranks():
+    bad = np.zeros((2, 2, 2, 2), dtype=np.float32)
+    with pytest.raises(ValueError, match="2-D or 3-D"):
+        slice_to_png(bad, axis=0, index=0)
+
+
 def test_lru_cache_bounded(nifti_file):
     clear_slice_cache()
     # Fill with > 256 entries; the first should evict.
