@@ -55,14 +55,17 @@ def make_router() -> APIRouter:
         for entry in data.get("metric_per_case") or []:
             cid = entry.get("reference_file") or entry.get("case_id") or ""
             metrics = entry.get("metrics") or {}
-            # Take the first non-background label's Dice
-            dice = None
+            # Average over all non-background label Dice values. Taking
+            # only the first one would report an arbitrary single-class
+            # score for multi-class datasets, which is what
+            # foreground_mean does for the dataset-level number.
+            fg_dices: list[float] = []
             for label, m in metrics.items():
                 if label == "0":
                     continue
                 if isinstance(m, dict) and "Dice" in m:
-                    dice = float(m["Dice"])
-                    break
+                    fg_dices.append(float(m["Dice"]))
+            dice = sum(fg_dices) / len(fg_dices) if fg_dices else None
             cases.append({"case_id": Path(cid).name, "dice": dice})
         return {"foreground_mean_dice": fg, "cases": cases}
 
