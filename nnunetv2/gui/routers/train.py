@@ -1,13 +1,13 @@
 """POST /api/train — fan a multi-fold request into N queued jobs."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Request, Response, status
 from pydantic import BaseModel, Field
 
+from nnunetv2.gui.config import job_env
 from nnunetv2.gui.services.cli_renderer import (
     TrainRequest,
     argv_to_cli_string,
@@ -86,7 +86,7 @@ def make_router() -> APIRouter:
             )
             j = await q.enqueue(
                 kind="train", argv=rendered["argv"],
-                env=os.environ.copy(), log_path=log_path,
+                env=job_env(cfg), log_path=log_path,
                 output_run_id=output_run_id,
             )
             job_ids.append(j.id)

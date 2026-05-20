@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
+from nnunetv2.gui.config import job_env
 from nnunetv2.gui.services.cli_renderer import (
     PredictRequest,
     argv_to_cli_string,
@@ -36,7 +36,7 @@ def make_router() -> APIRouter:
             / f"predict_d{req.dataset_id}_{req.configuration}.log"
         )
         job = await q.enqueue(
-            kind="predict", argv=argv, env=os.environ.copy(),
+            kind="predict", argv=argv, env=job_env(cfg),
             log_path=log_path,
         )
         return {"job_id": job.id, "argv": argv, "cli": cli}

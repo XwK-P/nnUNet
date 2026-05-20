@@ -1,12 +1,12 @@
 """POST /api/postproc/apply — enqueue nnUNetv2_apply_postprocessing."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 
+from nnunetv2.gui.config import job_env
 from nnunetv2.gui.services.cli_renderer import (
     PostprocRequest, render_postproc, argv_to_cli_string,
 )
@@ -24,7 +24,7 @@ def make_router() -> APIRouter:
         cfg = request.app.state.gui_config
         q = request.app.state.job_queue
         log_path = str(Path(cfg.results) / ".nnunet_gui" / "logs" / "postproc.log")
-        j = await q.enqueue(kind="postproc", argv=argv, env=os.environ.copy(),
+        j = await q.enqueue(kind="postproc", argv=argv, env=job_env(cfg),
                             log_path=log_path)
         return {"job_id": j.id, "argv": argv, "cli": cli}
 

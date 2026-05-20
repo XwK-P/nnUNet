@@ -1,12 +1,12 @@
 """Models router — list trained models + per-model actions."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from nnunetv2.gui.config import job_env
 from nnunetv2.gui.services.cli_renderer import (
     EnsembleRequest,
     ExportModelRequest,
@@ -38,7 +38,7 @@ def make_router() -> APIRouter:
         q = request.app.state.job_queue
         log_path = str(Path(cfg.results) / ".nnunet_gui" / "logs"
                        / f"export_d{req.dataset_id}.log")
-        j = await q.enqueue(kind="export", argv=argv, env=os.environ.copy(),
+        j = await q.enqueue(kind="export", argv=argv, env=job_env(cfg),
                             log_path=log_path)
         return {"job_id": j.id, "argv": argv, "cli": cli}
 
@@ -51,7 +51,7 @@ def make_router() -> APIRouter:
         cfg = request.app.state.gui_config
         q = request.app.state.job_queue
         log_path = str(Path(cfg.results) / ".nnunet_gui" / "logs" / "import_model.log")
-        j = await q.enqueue(kind="import", argv=argv, env=os.environ.copy(),
+        j = await q.enqueue(kind="import", argv=argv, env=job_env(cfg),
                             log_path=log_path)
         return {"job_id": j.id, "argv": argv, "cli": cli}
 
@@ -65,7 +65,7 @@ def make_router() -> APIRouter:
         q = request.app.state.job_queue
         log_path = str(Path(cfg.results) / ".nnunet_gui" / "logs"
                        / f"find_best_d{req.dataset_id}.log")
-        j = await q.enqueue(kind="find_best", argv=argv, env=os.environ.copy(),
+        j = await q.enqueue(kind="find_best", argv=argv, env=job_env(cfg),
                             log_path=log_path)
         return {"job_id": j.id, "argv": argv, "cli": cli}
 
@@ -78,7 +78,7 @@ def make_router() -> APIRouter:
         cfg = request.app.state.gui_config
         q = request.app.state.job_queue
         log_path = str(Path(cfg.results) / ".nnunet_gui" / "logs" / "ensemble.log")
-        j = await q.enqueue(kind="ensemble", argv=argv, env=os.environ.copy(),
+        j = await q.enqueue(kind="ensemble", argv=argv, env=job_env(cfg),
                             log_path=log_path)
         return {"job_id": j.id, "argv": argv, "cli": cli}
 

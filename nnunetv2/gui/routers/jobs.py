@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from nnunetv2.gui.config import job_env
 from nnunetv2.gui.jobs.signals import is_alive, kill_group, terminate
 from nnunetv2.gui.state.jobs import Job, JobFilter, get_job, list_jobs, update_job_status
 
@@ -116,7 +116,7 @@ def make_router() -> APIRouter:
             Path(cfg.results) / ".nnunet_gui" / "logs" / f"restart_{job_id}.log"
         )
         new = await request.app.state.job_queue.enqueue(
-            kind=old.kind, argv=argv, env=os.environ.copy(),
+            kind=old.kind, argv=argv, env=job_env(cfg),
             log_path=log_path, output_run_id=old.output_run_id,
             slot=old.slot,
         )

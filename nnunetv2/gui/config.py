@@ -66,6 +66,24 @@ def _from_env(name: str) -> Optional[Path]:
     return Path(val) if val else None
 
 
+def job_env(cfg: GuiConfig) -> dict[str, str]:
+    """Build the env passed to spawned nnUNet CLIs.
+
+    nnunetv2/paths.py reads nnUNet_raw/preprocessed/results from
+    ``os.environ`` at import time in the child process, so the GUI's
+    own GuiConfig overrides (from ``nnUNetv2_gui --raw/--preprocessed
+    /--results``) must be re-injected into the env before launching a
+    job. Otherwise the child resolves paths from the unmodified parent
+    env, which may be missing or stale relative to what the GUI itself
+    used to find datasets/runs/results.
+    """
+    env = os.environ.copy()
+    env["nnUNet_raw"] = str(cfg.raw)
+    env["nnUNet_preprocessed"] = str(cfg.preprocessed)
+    env["nnUNet_results"] = str(cfg.results)
+    return env
+
+
 # Allowlist of nnUNet-related env vars surfaced in the Settings UI.
 EDITABLE_ENV_VARS: tuple[str, ...] = (
     "nnUNet_raw",

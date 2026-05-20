@@ -1,11 +1,11 @@
 """POST /api/preprocess — render argv, optionally enqueue."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, Request, Response, status
 
+from nnunetv2.gui.config import job_env
 from nnunetv2.gui.services.cli_renderer import (
     PreprocessRequest,
     argv_to_cli_string,
@@ -35,7 +35,7 @@ def make_router() -> APIRouter:
             / f"preprocess_d{req.dataset_id}.log"
         )
         job = await q.enqueue(
-            kind="preprocess", argv=argv, env=os.environ.copy(),
+            kind="preprocess", argv=argv, env=job_env(cfg),
             log_path=log_path,
         )
         return {"job_id": job.id, "argv": argv, "cli": cli}
