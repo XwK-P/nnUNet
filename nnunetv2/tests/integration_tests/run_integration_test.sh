@@ -19,11 +19,27 @@ if [ "$GUI_ENABLED" = "1" ]; then
   echo "[integration] booting nnUNetv2_gui on port 8765"
   nnUNetv2_gui --host 127.0.0.1 --port 8765 >/tmp/nnunet_gui.log 2>&1 &
   GUI_PID=$!
-  # Wait until /api/system/healthz returns 200 (up to 15s)
+  # Wait until /api/system/healthz returns 200 (up to 15s). The whole point
+  # of the --gui mode is to exercise the GUI stack — silently continuing
+  # when the probe never goes green would turn a broken boot (missing dep,
+  # port collision, crash-on-start) into a passing run.
+  GUI_READY=0
   for _ in $(seq 1 30); do
-    if curl -sf http://127.0.0.1:8765/api/system/healthz >/dev/null; then break; fi
+    if curl -sf http://127.0.0.1:8765/api/system/healthz >/dev/null; then
+      GUI_READY=1
+      break
+    fi
     sleep 0.5
   done
+  if [ "$GUI_READY" != "1" ]; then
+    echo "FAIL: nnUNetv2_gui never became healthy on http://127.0.0.1:8765/api/system/healthz"
+    echo "----- /tmp/nnunet_gui.log (tail) -----"
+    tail -n 200 /tmp/nnunet_gui.log || true
+    echo "--------------------------------------"
+    kill "$GUI_PID" 2>/dev/null || true
+    wait "$GUI_PID" 2>/dev/null || true
+    exit 1
+  fi
 fi
 
 nnUNetv2_train $1 3d_fullres 0 -tr nnUNetTrainer_5epochs --npz
