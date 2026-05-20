@@ -76,6 +76,24 @@ def test_slice_to_png_rejects_other_ranks():
         slice_to_png(bad, axis=0, index=0)
 
 
+def test_open_nifti_handles_2d_volume(tmp_path):
+    """2D NIfTI headers carry only two zoom values. open_nifti must pad
+    the missing z spacing to 1.0 instead of IndexError'ing on zooms[2],
+    otherwise 2D preview requests 500 before slice_to_png ever runs.
+    """
+    import nibabel as nib
+    arr2d = np.arange(16 * 8, dtype=np.float32).reshape(16, 8)
+    img = nib.Nifti1Image(arr2d, affine=np.eye(4))
+    path = tmp_path / "case_001_0000.nii.gz"
+    nib.save(img, str(path))
+    arr, spacing = open_nifti(path)
+    assert arr.ndim == 2
+    assert arr.shape == (16, 8)
+    assert len(spacing) == 3
+    # The synthetic 2D image has zooms (1.0, 1.0); z should default to 1.0
+    assert spacing[2] == 1.0
+
+
 def test_lru_cache_bounded(nifti_file):
     clear_slice_cache()
     # Fill with > 256 entries; the first should evict.

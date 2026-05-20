@@ -38,12 +38,16 @@ def open_nifti(path: Path | str) -> tuple[np.ndarray, tuple[float, float, float]
     """Open `path` with nibabel and return (data, spacing).
 
     Data is returned as a float32 numpy array regardless of on-disk dtype.
-    Spacing is (sx, sy, sz) in mm.
+    Spacing is (sx, sy, sz) in mm; 2-D NIfTIs only carry two zooms, so the
+    missing z spacing is padded with 1.0 to match the 3-tuple contract.
     """
     img = nib.load(str(path))
     arr = np.asarray(img.dataobj, dtype=np.float32)
     zooms = img.header.get_zooms()[:3]
-    spacing = (float(zooms[0]), float(zooms[1]), float(zooms[2]))
+    sx = float(zooms[0]) if len(zooms) > 0 else 1.0
+    sy = float(zooms[1]) if len(zooms) > 1 else 1.0
+    sz = float(zooms[2]) if len(zooms) > 2 else 1.0
+    spacing = (sx, sy, sz)
     return arr, spacing
 
 
