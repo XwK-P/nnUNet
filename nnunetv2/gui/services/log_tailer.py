@@ -42,9 +42,15 @@ async def tail_lines(
                 yield line.decode("utf-8", errors="replace").rstrip("\r")
             last_size = size
         else:
+            # Two consecutive polls observing the same size with no new
+            # bytes -> EOF. last_size must update even when no bytes were
+            # read this iteration, otherwise an existing empty log file
+            # (size=0 from the start) would never satisfy this check
+            # because last_size stays at its -1 sentinel forever.
             if stop_on_eof and last_size == size:
                 # Flush any tail bytes without trailing newline.
                 if buf:
                     yield buf.decode("utf-8", errors="replace").rstrip("\r")
                 return
+            last_size = size
             await asyncio.sleep(poll_interval)

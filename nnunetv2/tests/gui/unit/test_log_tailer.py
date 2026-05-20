@@ -46,6 +46,28 @@ async def test_tail_picks_up_appends(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_tail_stop_on_eof_terminates_on_empty_file(tmp_path):
+    """A pre-existing empty log file must terminate cleanly under
+    stop_on_eof. Earlier code left ``last_size`` at the ``-1`` sentinel
+    when no bytes were ever read, so ``last_size == size`` never held
+    for size==0 and the iterator hung forever.
+    """
+    log = tmp_path / "empty.log"
+    log.write_bytes(b"")
+    out: list[str] = []
+
+    async def consume():
+        async for line in tail_lines(log, poll_interval=0.01, stop_on_eof=True):
+            out.append(line)
+
+    # The fixed code observes size==0 on two consecutive polls and
+    # returns within a few poll intervals (~0.02s); a 1s budget covers
+    # CI jitter without masking a real regression.
+    await asyncio.wait_for(consume(), timeout=1.0)
+    assert out == []
+
+
+@pytest.mark.asyncio
 async def test_tail_handles_missing_file(tmp_path):
     log = tmp_path / "not_yet.txt"
     seen: list[str] = []
