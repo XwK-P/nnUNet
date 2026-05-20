@@ -43,11 +43,32 @@ def make_router() -> APIRouter:
                 status_code=409,
                 detail=f"Cannot stop a job in status {j.status!r}",
             )
+        # In the 'starting' window the launcher has flipped status but
+        # not yet returned from Popen, so pgid can be momentarily None.
+        # Poll the row briefly instead of 500'ing the user-visible action.
+        loop = asyncio.get_event_loop()
+        pgid_deadline = loop.time() + 2.0
+        while j.pgid is None and loop.time() < pgid_deadline:
+            await asyncio.sleep(0.1)
+            refreshed = get_job(cfg, job_id)
+            if refreshed is None:
+                # Row vanished mid-poll — treat as already-gone.
+                raise HTTPException(status_code=404, detail="Job not found")
+            j = refreshed
+            if j.status not in ("starting", "running"):
+                # The launcher landed in a terminal state on its own
+                # (e.g. spawn failed); no group to signal.
+                return {"ok": True, "status": j.status}
         if j.pgid is None:
-            raise HTTPException(status_code=500, detail="job has no pgid recorded")
+            # Still no pgid after the grace window. Don't 500 — surface as
+            # 409 so the client can retry once the launcher finishes wiring
+            # the row up.
+            raise HTTPException(
+                status_code=409,
+                detail="job has no pgid yet (launcher mid-spawn); retry shortly",
+            )
         terminate(j.pgid)
         # Grace period 5s for SIGTERM
-        loop = asyncio.get_event_loop()
         deadline = loop.time() + 5
         while is_alive(j.pgid) and loop.time() < deadline:
             await asyncio.sleep(0.2)

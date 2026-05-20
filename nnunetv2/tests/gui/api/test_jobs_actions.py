@@ -57,6 +57,24 @@ def test_stop_unknown_job_404(populated_client):
     assert r.status_code == 404
 
 
+def test_stop_starting_without_pgid_returns_conflict_not_500(populated_client):
+    """In the narrow window between status='starting' and the launcher
+    writing pid/pgid back, /stop must not 500 the user. Surface 409 so
+    the client can retry instead of bubbling a server error to the UI.
+    """
+    cfg = _cfg_from_client(populated_client)
+    j = insert_job(cfg, Job(
+        id=None, kind="train", args_json="[]",
+        pid=None, pgid=None, status="starting",
+        started_at=None, ended_at=None, exit_code=None,
+        log_path=None, output_run_id=None,
+        created_by="gui", error_message=None, slot="global",
+    ))
+    r = populated_client.post(f"/api/jobs/{j.id}/stop")
+    assert r.status_code == 409
+    assert "retry" in r.json().get("detail", "").lower()
+
+
 def test_cancel_queued_job(populated_client):
     cfg = _cfg_from_client(populated_client)
     j = insert_job(cfg, Job(
