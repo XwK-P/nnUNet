@@ -79,3 +79,45 @@ def test_job_explicit_slot_preserved(gui_config):
     j = insert_job(gui_config, _make(slot="dataset_27"))
     fetched = get_job(gui_config, j.id)
     assert fetched.slot == "dataset_27"
+
+
+def test_init_db_migrates_legacy_job_table(gui_config):
+    """A state.db from an older install will have a `job` table that
+    lacks both `slot` and `env_json`. init_db must add the missing
+    nullable columns idempotently so the next enqueue can write to them.
+    """
+    import sqlite3
+    cfg = gui_config
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    # Hand-build a pre-migration `job` table with the original v1 schema.
+    db_path = cfg.state_db
+    if db_path.exists():
+        db_path.unlink()
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE job (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            args_json TEXT NOT NULL,
+            pid INTEGER, pgid INTEGER,
+            status TEXT NOT NULL,
+            started_at TIMESTAMP, ended_at TIMESTAMP,
+            exit_code INTEGER, log_path TEXT,
+            output_run_id TEXT, created_by TEXT, error_message TEXT
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+    # Migration should add slot + env_json without erroring.
+    init_db(cfg)
+    conn = sqlite3.connect(str(db_path))
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(job)")}
+    conn.close()
+    assert "slot" in cols
+    assert "env_json" in cols
+    # And the upgraded table is still functional through the ORM layer.
+    j = insert_job(cfg, _make())
+    assert j.slot == "global"
+    assert j.env_json is None
