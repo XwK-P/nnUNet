@@ -76,6 +76,26 @@ def insert_job(cfg: GuiConfig, job: Job) -> Job:
     return fetched
 
 
+def claim_queued_for_launch(cfg: GuiConfig, job_id: int) -> bool:
+    """Atomically transition ``queued`` -> ``starting`` for a single row.
+
+    Returns True iff we won the claim — i.e. the row was still queued at
+    the moment the UPDATE ran. False covers the race where /cancel ran
+    between _pop_next_queued and _launch_in_place, or the row no longer
+    exists. The queue worker uses this as the gate that decides whether
+    to actually spawn the subprocess.
+    """
+    stmt = (
+        job_table.update()
+        .where(job_table.c.id == job_id)
+        .where(job_table.c.status == "queued")
+        .values(status="starting")
+    )
+    with session_scope(cfg) as s:
+        result = s.execute(stmt)
+    return (result.rowcount or 0) > 0
+
+
 def update_job_status(
     cfg: GuiConfig, job_id: int, *,
     status: Optional[str] = None,

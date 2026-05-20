@@ -20,6 +20,7 @@ from nnunetv2.gui.jobs.reaper import run_reaper
 from nnunetv2.gui.state.jobs import (
     Job,
     JobFilter,
+    claim_queued_for_launch,
     get_job,
     insert_job,
     list_jobs,
@@ -83,7 +84,15 @@ class JobQueue:
         under the same lock). Falls back to the current process env only
         if the row has no captured env, which today only happens for rows
         written by a pre-env_json schema.
+
+        Atomically claims the row out of `queued` -> `starting` before
+        doing any work so a /cancel that lands between _pop_next_queued
+        and this Popen does not result in a wasted GPU launch. If the
+        claim fails (row was already cancelled or removed), we simply
+        return — the worker loop moves on to the next queued candidate.
         """
+        if not claim_queued_for_launch(self.cfg, queued.id):
+            return
         argv = json.loads(queued.args_json)
         if queued.env_json:
             env = json.loads(queued.env_json)

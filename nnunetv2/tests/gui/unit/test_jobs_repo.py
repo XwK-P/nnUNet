@@ -81,6 +81,32 @@ def test_job_explicit_slot_preserved(gui_config):
     assert fetched.slot == "dataset_27"
 
 
+def test_claim_queued_for_launch_returns_true_only_once(gui_config):
+    """Atomic queued -> starting transition: the first claim wins; a
+    concurrent claim must observe rowcount=0 even though the row id is
+    still valid. Models the /cancel-after-pop race.
+    """
+    from nnunetv2.gui.state.jobs import claim_queued_for_launch
+    init_db(gui_config)
+    j = insert_job(gui_config, _make(status="queued"))
+    assert claim_queued_for_launch(gui_config, j.id) is True
+    # Second claim sees status='starting' and fails the WHERE clause.
+    assert claim_queued_for_launch(gui_config, j.id) is False
+    fetched = get_job(gui_config, j.id)
+    assert fetched.status == "starting"
+
+
+def test_claim_queued_for_launch_rejects_cancelled_row(gui_config):
+    from nnunetv2.gui.state.jobs import claim_queued_for_launch
+    init_db(gui_config)
+    j = insert_job(gui_config, _make(status="queued"))
+    update_job_status(gui_config, j.id, status="cancelled")
+    # Same row, but status is no longer 'queued' — the claim must be a no-op.
+    assert claim_queued_for_launch(gui_config, j.id) is False
+    fetched = get_job(gui_config, j.id)
+    assert fetched.status == "cancelled"
+
+
 def test_init_db_migrates_legacy_job_table(gui_config):
     """A state.db from an older install will have a `job` table that
     lacks both `slot` and `env_json`. init_db must add the missing
