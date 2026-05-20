@@ -131,8 +131,37 @@ def make_router() -> APIRouter:
         if match is None:
             raise HTTPException(status_code=404, detail=f"No prediction for {case_id!r}")
         window = (window_lo, window_hi) if (window_lo is not None and window_hi is not None) else None
-        png = get_slice_png_cached(str(match), axis=axis, index=slice, window=window)
-        return Response(content=png, media_type="image/png")
+        name_lower = match.name.lower()
+        # The image viewer is built around the NIfTI loader, but list_predictions
+        # surfaces every nnUNet-supported output format. Dispatch on suffix so
+        # non-NIfTI predictions render with an appropriate decoder instead of
+        # being handed to the NIfTI path and 500'ing during decode.
+        if name_lower.endswith((".nii.gz", ".nii")):
+            png = get_slice_png_cached(str(match), axis=axis, index=slice, window=window)
+            return Response(content=png, media_type="image/png")
+        if name_lower.endswith(".png"):
+            # A PNG prediction is already a 2D image; the axis/slice/window
+            # knobs don't apply, so return the file verbatim.
+            return Response(content=match.read_bytes(), media_type="image/png")
+        if name_lower.endswith((".tif", ".tiff")):
+            # PIL supports multi-frame TIFFs via .seek(); treat the `slice`
+            # query param as the frame index and clamp it. 2-D TIFFs report
+            # n_frames==1, so the index is forced to 0.
+            import io as _io
+            from PIL import Image
+            with Image.open(str(match)) as img:
+                n_frames = getattr(img, "n_frames", 1)
+                frame = max(0, min(n_frames - 1, int(slice)))
+                img.seek(frame)
+                buf = _io.BytesIO()
+                img.convert("L").save(buf, format="PNG")
+                return Response(content=buf.getvalue(), media_type="image/png")
+        # .nrrd, .mha — listed as predictions but no decoder wired up yet.
+        # Surface a clear 415 instead of letting the NIfTI loader 500.
+        raise HTTPException(
+            status_code=415,
+            detail=f"Preview not supported for {match.suffix!r}",
+        )
 
     @router.get("/{run_id:path}/metrics_history")
     def metrics_history(run_id: str, request: Request) -> list[dict]:
