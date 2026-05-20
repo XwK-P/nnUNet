@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from nnunetv2.gui.services.log_tailer import tail_lines
 from nnunetv2.gui.services.sse import RunStreamHub, sse_format
-from nnunetv2.gui.services.tb_tailer import read_all_metrics, tail_metrics
+from nnunetv2.gui.services.tb_tailer import read_all_metrics, read_image_samples, tail_metrics
 from nnunetv2.gui.state.runs import get_run
 
 
@@ -73,7 +73,51 @@ def make_router() -> APIRouter:
                 except Exception as e:
                     await q.put(("status", {"phase": "log_tailer_error", "message": str(e)}))
 
-            tasks = [asyncio.create_task(pump_metrics()), asyncio.create_task(pump_logs())]
+            # Periodically poll the TB event dir for image-summary entries
+            # and emit any newly-seen (tag, step) pair. This is best-effort:
+            # tbparse only exposes shape, not bytes, so we route subscribers
+            # to the existing /api/runs/{id}/images/{step}/{tag} URL (Phase 6
+            # in the design doc) — we just announce that one exists.
+            async def pump_image_samples() -> None:
+                seen: set[tuple[str, int]] = set()
+                # Replay everything that's already on disk once so the client
+                # has an initial inventory.
+                try:
+                    for s in read_image_samples(tb_dir):
+                        key = (s["tag"], s["step"])
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        await q.put(("image_sample", s))
+                except Exception as e:
+                    await q.put(
+                        ("status", {"phase": "image_sample_initial_error", "message": str(e)})
+                    )
+                # Then diff every 2s. Image-sample writes are infrequent
+                # (every N epochs) so a slower poll is fine.
+                while not stop.is_set():
+                    try:
+                        await asyncio.sleep(2.0)
+                        if stop.is_set():
+                            return
+                        for s in read_image_samples(tb_dir):
+                            key = (s["tag"], s["step"])
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            await q.put(("image_sample", s))
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        await q.put(
+                            ("status", {"phase": "image_sample_tailer_error", "message": str(e)})
+                        )
+
+            tasks = [
+                asyncio.create_task(pump_metrics()),
+                asyncio.create_task(pump_logs()),
+                asyncio.create_task(pump_image_samples()),
+            ]
             # Heartbeat every HEARTBEAT_INTERVAL_S of quiet, but poll
             # is_disconnected more often so TestClient + production proxies
             # both notice disconnects within ~1s instead of 15s.
