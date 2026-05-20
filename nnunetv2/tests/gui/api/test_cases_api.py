@@ -42,6 +42,24 @@ def nifti_client(populated_nifti_paths, monkeypatch):
     return TestClient(create_app(GuiConfig.from_env_and_args(host="127.0.0.1", port=0, token=None)))
 
 
+def test_case_shape_returns_volume_dims(nifti_client):
+    # The fixture builder writes (8, 16, 16) volumes; the endpoint must
+    # surface those dims so the slider can be bounded per-axis.
+    r = nifti_client.get("/api/datasets/Dataset027_ACDC/cases/case_001/shape")
+    assert r.status_code == 200
+    payload = r.json()
+    assert "shape" in payload
+    shape = payload["shape"]
+    assert isinstance(shape, list) and len(shape) == 3
+    assert all(isinstance(x, int) for x in shape)
+    assert shape == [8, 16, 16]
+
+
+def test_case_shape_unknown_case(nifti_client):
+    r = nifti_client.get("/api/datasets/Dataset027_ACDC/cases/case_999/shape")
+    assert r.status_code == 404
+
+
 def test_preview_returns_png(nifti_client):
     r = nifti_client.get("/api/datasets/Dataset027_ACDC/cases/case_001/preview?axis=0&slice=4&channel=0")
     assert r.status_code == 200

@@ -15,7 +15,34 @@
   // but defaults off — the server doesn't expose raw NIfTI URLs yet (Phase 6).
   let mode = $state<'png' | 'niivue'>('png');
 
+  // [d0, d1, d2] of the chosen case's first channel. Drives slider bounds so
+  // high-depth volumes (>256 slices) are fully reachable.
+  let shape = $state<[number, number, number] | null>(null);
+
   const channels = $derived(Object.keys(caseObj.channels).sort());
+
+  $effect(() => {
+    let cancelled = false;
+    shape = null;
+    imageEndpoints
+      .getCaseShape(datasetId, caseObj.id)
+      .then((res) => {
+        if (!cancelled) shape = res.shape;
+      })
+      .catch(() => {
+        if (!cancelled) shape = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  const sliceMax = $derived(shape ? Math.max(0, shape[axis] - 1) : 0);
+
+  $effect(() => {
+    // Clamp the slice index when axis changes or a new (smaller) volume loads.
+    if (slice > sliceMax) slice = sliceMax;
+  });
 
   const previewUrl = $derived(
     imageEndpoints.getCasePreviewUrl(datasetId, caseObj.id, {
@@ -45,8 +72,8 @@
       </select>
     </label>
     <label class="text-slate-500 flex-1 flex items-center gap-2">Slice
-      <input type="range" min="0" max="255" bind:value={slice} class="flex-1" />
-      <span class="w-8 text-right text-slate-400">{slice}</span>
+      <input type="range" min="0" max={sliceMax} bind:value={slice} class="flex-1" disabled={shape === null} />
+      <span class="w-16 text-right text-slate-400">{slice}/{shape ? sliceMax : '?'}</span>
     </label>
     {#if caseObj.label_path}
       <label class="text-slate-500 flex items-center gap-1">

@@ -162,6 +162,14 @@ export const imageEndpoints = {
   getCases: (datasetId: string): Promise<Case[]> =>
     api.get<Case[]>(`/api/datasets/${encodeURIComponent(datasetId)}/cases`),
 
+  getCaseShape: (
+    datasetId: string,
+    caseId: string,
+  ): Promise<{ shape: [number, number, number] }> =>
+    api.get<{ shape: [number, number, number] }>(
+      `/api/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}/shape`,
+    ),
+
   getCasePreviewUrl: (
     datasetId: string, caseId: string,
     opts: { axis: number; slice: number; channel: number; window?: [number, number] },

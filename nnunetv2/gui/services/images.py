@@ -19,6 +19,21 @@ from PIL import Image
 SLICE_CACHE_MAXSIZE = 256
 
 
+def volume_shape(path: Path | str) -> tuple[int, int, int]:
+    """Return the (d0, d1, d2) shape of `path` without loading voxels.
+
+    nibabel reads only the header — much cheaper than open_nifti when the
+    caller just wants axis lengths (e.g. to bound the slice slider).
+    """
+    img = nib.load(str(path))
+    shape = img.shape
+    if len(shape) < 3:
+        # Pad 2D images to a 3-tuple so downstream slider logic doesn't
+        # have to special-case them.
+        return (int(shape[0]), int(shape[1]) if len(shape) > 1 else 1, 1)
+    return (int(shape[0]), int(shape[1]), int(shape[2]))
+
+
 def open_nifti(path: Path | str) -> tuple[np.ndarray, tuple[float, float, float]]:
     """Open `path` with nibabel and return (data, spacing).
 

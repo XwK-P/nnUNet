@@ -82,6 +82,26 @@ def make_router() -> APIRouter:
         png = get_slice_png_cached(match.channels[chan_key], axis=axis, index=slice, window=window)
         return Response(content=png, media_type="image/png")
 
+    @router.get("/{dataset_id}/cases/{case_id}/shape")
+    def case_shape(dataset_id: str, case_id: str, request: Request) -> dict:
+        """Return the (d0, d1, d2) shape of the case's channel-0 volume.
+
+        Frontend uses this to bound the slice slider per axis. Reads only
+        the NIfTI header so it's cheap to call on case selection.
+        """
+        from nnunetv2.gui.services.images import volume_shape
+        cfg = request.app.state.gui_config
+        cases = list_cases_for_dataset(cfg, dataset_id)
+        match = next((c for c in cases if c.id == case_id), None)
+        if match is None:
+            raise HTTPException(status_code=404, detail=f"Case {case_id!r} not found")
+        if not match.channels:
+            raise HTTPException(status_code=404, detail=f"Case {case_id!r} has no channels")
+        # Shape is volume geometry — same for every channel.
+        chan_path = next(iter(sorted(match.channels.items())))[1]
+        d0, d1, d2 = volume_shape(chan_path)
+        return {"shape": [d0, d1, d2]}
+
     @router.get("/{dataset_id}/cases/{case_id}/labels")
     def case_labels(
         dataset_id: str, case_id: str, request: Request,
