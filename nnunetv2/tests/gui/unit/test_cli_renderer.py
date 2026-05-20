@@ -139,6 +139,26 @@ def test_render_predict_skips_chk_for_default_filename_variants():
         assert "-chk" not in argv, f"should not emit -chk for default value {value!r}"
 
 
+def test_render_predict_omits_f_when_no_folds():
+    # Empty folds (the new default) -> no -f flag, letting nnUNetv2_predict
+    # use the documented 5-fold CV ensemble default. Previously the field
+    # defaulted to ["all"] which emitted `-f all` and meant "load fold_all
+    # specifically" — broken for any model that only has fold_0..fold_4.
+    req = PredictRequest(dataset_id=27, configuration="3d_fullres",
+                          input_folder="/in", output_folder="/out")
+    argv = render_predict(req)
+    assert "-f" not in argv, (
+        f"-f must not be emitted when no folds are explicitly chosen; argv={argv}"
+    )
+
+
+def test_render_predict_default_folds_is_empty():
+    # The Field default itself must be the empty list, not ['all'].
+    req = PredictRequest(dataset_id=27, configuration="3d_fullres",
+                          input_folder="/in", output_folder="/out")
+    assert req.folds == []
+
+
 def test_render_predict_continue_uses_long_flag():
     # `-c` is the required configuration arg of nnUNetv2_predict, so resume
     # must use the long --continue_prediction flag and never emit a bare -c

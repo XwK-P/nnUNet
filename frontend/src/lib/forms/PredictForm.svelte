@@ -8,7 +8,11 @@
   let configuration = $state('3d_fullres');
   let inputFolder = $state('');
   let outputFolder = $state('');
-  let folds = $state<string[]>(['all']);
+  // Default to the 5-fold CV ensemble — matches nnUNet's documented
+  // default when -f is not passed. Selecting 'all' instead would render
+  // `-f all`, which means "load fold_all" specifically (and fails for
+  // models that only have fold_0..fold_4 on disk).
+  let folds = $state<string[]>(['0', '1', '2', '3', '4']);
   let checkpoint = $state<'checkpoint_final' | 'checkpoint_best'>('checkpoint_final');
   let stepSize = $state(0.5);
   let disableTta = $state(false);

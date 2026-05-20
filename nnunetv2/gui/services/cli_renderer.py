@@ -42,7 +42,12 @@ class PredictRequest(BaseModel):
     configuration: str
     input_folder: str
     output_folder: str
-    folds: list[str] = Field(default_factory=lambda: ["all"])
+    # Empty list -> omit -f, letting nnUNetv2_predict use the documented
+    # 5-fold CV ensemble default. The previous default ["all"] emitted
+    # `-f all` which means "load fold_all" specifically, not "ensemble" —
+    # so a normal model (fold_0..fold_4 only) would fail checkpoint
+    # lookup until the user manually toggled the fold selection.
+    folds: list[str] = Field(default_factory=list)
     trainer: Optional[str] = None
     plans: Optional[str] = None
     checkpoint: str = "checkpoint_final"  # or 'checkpoint_best'
@@ -102,8 +107,12 @@ def render_predict(req: PredictRequest) -> list[str]:
         "-o", req.output_folder,
         "-d", str(req.dataset_id),
         "-c", req.configuration,
-        "-f", *req.folds,
     ]
+    # Only emit -f when the caller explicitly chose folds. Omitting -f
+    # makes nnUNetv2_predict use the documented CV ensemble default;
+    # `-f all` was the buggy old default and means "fold_all" instead.
+    if req.folds:
+        argv += ["-f", *req.folds]
     if req.trainer:
         argv += ["-tr", req.trainer]
     if req.plans:
