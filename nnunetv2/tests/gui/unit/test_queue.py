@@ -66,15 +66,59 @@ async def test_queue_cancel_nonexistent_returns_false(gui_config):
 
 
 @pytest.mark.asyncio
+async def test_queue_uses_per_job_env_not_first_enqueue_env(gui_config, tmp_path):
+    """When two jobs are queued under one slot with different envs, the
+    second job must launch with its own env, not inherit the first.
+
+    Strategy: have each subprocess write its key NNUNET_TEST_TAG to a file
+    via a tiny stdin-free helper. The two jobs each pin a distinct value;
+    if the worker reused the first job's env, the second file would carry
+    the first value.
+    """
+    init_db(gui_config)
+    q = JobQueue(gui_config)
+
+    helper_src = tmp_path / "envtag.py"
+    helper_src.write_text(
+        "import os, sys\n"
+        "open(sys.argv[1], 'w').write(os.environ.get('NNUNET_TEST_TAG', '<missing>'))\n"
+    )
+    tag1_out = tmp_path / "j1_tag.txt"
+    tag2_out = tmp_path / "j2_tag.txt"
+
+    env_a = {**os.environ, "NNUNET_TEST_TAG": "alpha"}
+    env_b = {**os.environ, "NNUNET_TEST_TAG": "beta"}
+
+    await q.enqueue(
+        kind="train", argv=[sys.executable, str(helper_src), str(tag1_out)],
+        env=env_a, log_path=str(gui_config.results / "j1.log"),
+    )
+    await q.enqueue(
+        kind="train", argv=[sys.executable, str(helper_src), str(tag2_out)],
+        env=env_b, log_path=str(gui_config.results / "j2.log"),
+    )
+    await q.drain(timeout=10)
+
+    assert tag1_out.read_text() == "alpha"
+    assert tag2_out.read_text() == "beta", (
+        "second job inherited the first job's env — worker is reusing a single dict"
+    )
+
+
+@pytest.mark.asyncio
 async def test_kickstart_pending_resumes_queued_after_restart(gui_config):
     """A queued row left from a previous boot must be picked up by kickstart_pending."""
     from nnunetv2.gui.state.jobs import Job, insert_job
     init_db(gui_config)
-    # Simulate a row written by a prior server boot.
+    import json as _json
+    # Simulate a row written by a prior server boot, including the env
+    # captured at that earlier enqueue — kickstart_pending must use that
+    # row's env rather than asking callers to re-provide one.
     insert_job(gui_config, Job(
         id=None, kind="train",
         args_json='["%s", "-m", "nnunetv2.tests.gui.helpers.sleep_helper", "0.05", "0"]'
                   % sys.executable.replace("\\", "\\\\"),
+        env_json=_json.dumps(dict(os.environ)),
         pid=None, pgid=None, status="queued",
         started_at=None, ended_at=None, exit_code=None,
         log_path=str(gui_config.results / "boot.log"),
@@ -82,7 +126,7 @@ async def test_kickstart_pending_resumes_queued_after_restart(gui_config):
     ))
     # Fresh queue (mimics a fresh process), no prior enqueue to kick the worker.
     q = JobQueue(gui_config)
-    kicked = await q.kickstart_pending(env=os.environ.copy())
+    kicked = await q.kickstart_pending()
     assert kicked == 1
     await q.drain(timeout=10)
     [row] = list_jobs(gui_config, JobFilter())

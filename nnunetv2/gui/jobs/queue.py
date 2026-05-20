@@ -38,22 +38,28 @@ class JobQueue:
         *, kind: str, argv: list[str], env: dict[str, str], log_path: str,
         output_run_id: Optional[str] = None, slot: str = "global",
     ) -> Job:
-        """Persist a queued row and kick the worker if idle."""
+        """Persist a queued row and kick the worker if idle.
+
+        The full caller-supplied env is JSON-serialised onto the row so the
+        worker can launch with the exact environment captured at enqueue
+        time, even if other enqueues land before this one runs.
+        """
         # Persist as 'queued' first so the UI sees it immediately.
         job = insert_job(self.cfg, Job(
             id=None, kind=kind, args_json=json.dumps(argv),
+            env_json=json.dumps(env),
             pid=None, pgid=None, status="queued",
             started_at=None, ended_at=None, exit_code=None,
             log_path=log_path, output_run_id=output_run_id,
             created_by="gui", error_message=None, slot=slot,
         ))
         # Kick worker; it picks up the next 'queued' job in this slot.
-        t = asyncio.create_task(self._worker_kick(slot, env))
+        t = asyncio.create_task(self._worker_kick(slot))
         self._tasks.add(t)
         t.add_done_callback(self._tasks.discard)
         return job
 
-    async def _worker_kick(self, slot: str, env: dict[str, str]) -> None:
+    async def _worker_kick(self, slot: str) -> None:
         lock = self._locks[slot]
         if lock.locked():
             return  # another worker is already running
@@ -62,15 +68,27 @@ class JobQueue:
                 next_job = self._pop_next_queued(slot)
                 if next_job is None:
                     return
-                await self._launch_in_place(next_job, env)
+                await self._launch_in_place(next_job)
                 # Reaper runs inline so the lock is held until exit (serial).
                 if next_job.pid is None:
                     continue  # spawn failed; row marked failed by launcher
                 await run_reaper(self.cfg, next_job.id, next_job.pid)
 
-    async def _launch_in_place(self, queued: Job, env: dict[str, str]) -> None:
-        """Promote a queued row to running by spawning the subprocess."""
+    async def _launch_in_place(self, queued: Job) -> None:
+        """Promote a queued row to running by spawning the subprocess.
+
+        Reads the launch environment from `queued.env_json` so each job in
+        a slot gets its own env (defended against cross-contamination when
+        a later enqueue with different paths is sitting behind this one
+        under the same lock). Falls back to the current process env only
+        if the row has no captured env, which today only happens for rows
+        written by a pre-env_json schema.
+        """
         argv = json.loads(queued.args_json)
+        if queued.env_json:
+            env = json.loads(queued.env_json)
+        else:
+            env = dict(os.environ)
         log_path = queued.log_path or str(Path(self.cfg.results) / f"job_{queued.id}.log")
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -118,22 +136,23 @@ class JobQueue:
                           ended_at=datetime.now(timezone.utc))
         return True
 
-    async def kickstart_pending(self, env: Optional[dict[str, str]] = None) -> int:
+    async def kickstart_pending(self) -> int:
         """Resume queued slots after a server restart.
 
-        ``enqueue`` is what normally kicks a worker, so jobs left queued by
-        a previous boot would otherwise sit forever waiting for a fresh
-        enqueue to advance the lane. Walks `job WHERE status = 'queued'`,
-        groups by ``slot``, and starts one worker per distinct slot using
-        the current process environment by default.
+        ``enqueue`` is what normally kicks a worker, so jobs left queued
+        by a previous boot would otherwise sit forever waiting for a fresh
+        enqueue to advance the lane. Walks ``job WHERE status = 'queued'``,
+        groups by ``slot``, and starts one worker per distinct slot. Each
+        row's own env_json drives the eventual launch, so a re-attached
+        queue resumes with the environment that was captured when the row
+        was first enqueued.
         """
-        env = env if env is not None else dict(os.environ)
         queued = [j for j in list_jobs(self.cfg, JobFilter(status="queued"))]
         slots = {j.slot for j in queued}
         for slot in slots:
             if self._locks[slot].locked():
                 continue
-            t = asyncio.create_task(self._worker_kick(slot, env))
+            t = asyncio.create_task(self._worker_kick(slot))
             self._tasks.add(t)
             t.add_done_callback(self._tasks.discard)
         return len(slots)

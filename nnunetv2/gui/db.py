@@ -74,6 +74,11 @@ job_table = Table(
     Column("created_by", String, nullable=True),
     Column("error_message", String, nullable=True),
     Column("slot", String, nullable=False, server_default="global"),
+    # env_json: JSON-encoded process environment captured at enqueue time.
+    # The queue worker uses each row's own env when launching, so a later
+    # enqueue with different nnUNet_* paths can't clobber earlier queued
+    # jobs by sharing one worker-scoped env dict.
+    Column("env_json", String, nullable=True),
     Index("ix_job_status", "status"),
 )
 

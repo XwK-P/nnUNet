@@ -26,6 +26,7 @@ class Job(BaseModel):
     created_by: Optional[str]
     error_message: Optional[str]
     slot: str = "global"
+    env_json: Optional[str] = None
 
 
 class JobFilter(BaseModel):
@@ -42,6 +43,7 @@ def _row_to_model(row) -> Job:
         output_run_id=row.output_run_id, created_by=row.created_by,
         error_message=row.error_message,
         slot=getattr(row, "slot", None) or "global",
+        env_json=getattr(row, "env_json", None),
     )
 
 
