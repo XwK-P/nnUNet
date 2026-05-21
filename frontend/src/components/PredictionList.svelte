@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { imageEndpoints } from '../lib/api';
   import Canvas2DViewer from '../lib/viewer/Canvas2DViewer.svelte';
   import type { Prediction } from '../lib/types';
@@ -12,10 +11,10 @@
   let loading = $state(false);
   let error = $state<string | null>(null);
 
-  async function load() {
+  async function load(id: string) {
     loading = true; error = null;
     try {
-      preds = await imageEndpoints.getPredictions(runId);
+      preds = await imageEndpoints.getPredictions(id);
     } catch (e: unknown) {
       error = (e as Error).message;
     } finally {
@@ -23,8 +22,13 @@
     }
   }
 
-  onMount(() => { load(); });
-  $effect(() => { load(); });
+  // Single source of truth: $effect runs on mount AND whenever runId
+  // changes. The previous code also called load() from onMount, so the
+  // predictions endpoint fired twice on first render — wasted backend
+  // load plus a flicker if the two requests resolved in reverse order.
+  $effect(() => {
+    if (runId) load(runId);
+  });
 
   const previewUrl = $derived(
     selected ? imageEndpoints.getPredictionPreviewUrl(runId, selected.case_id, { axis, slice }) : null
