@@ -12,23 +12,45 @@
   let error = $state<string | null>(null);
   let shape = $state<[number, number, number] | null>(null);
 
-  async function load(id: string) {
-    loading = true; error = null;
+  // Generation counter for in-flight load() calls. Each run-change
+  // bumps it; a load() response is only applied if the gen at the
+  // time of the call still matches. Without this, the slow tail of a
+  // previous run's fetch could overwrite the new run's prediction
+  // list, and subsequent preview/shape requests would target cases
+  // that don't exist in the active run.
+  let loadGen = 0;
+
+  async function load(id: string, gen: number) {
+    loading = true;
+    error = null;
     try {
-      preds = await imageEndpoints.getPredictions(id);
+      const result = await imageEndpoints.getPredictions(id);
+      if (gen !== loadGen) return;
+      preds = result;
     } catch (e: unknown) {
+      if (gen !== loadGen) return;
       error = (e as Error).message;
     } finally {
-      loading = false;
+      if (gen === loadGen) loading = false;
     }
   }
 
   // Single source of truth: $effect runs on mount AND whenever runId
-  // changes. The previous code also called load() from onMount, so the
-  // predictions endpoint fired twice on first render — wasted backend
-  // load plus a flicker if the two requests resolved in reverse order.
+  // changes. We reset every piece of run-scoped state here so the
+  // previous run's selected case / slice / shape / cached preds do
+  // not bleed into the new run — otherwise previewUrl would be built
+  // against a case id that may not exist in the new predictions
+  // folder, hammering the backend with 404s until the user manually
+  // reselects.
   $effect(() => {
-    if (runId) load(runId);
+    if (!runId) return;
+    loadGen += 1;
+    preds = [];
+    selected = null;
+    shape = null;
+    slice = 0;
+    error = null;
+    load(runId, loadGen);
   });
 
   // Reset the shape + slice when the user picks a new case, then fetch
