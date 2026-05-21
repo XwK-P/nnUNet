@@ -81,7 +81,20 @@ Killing the GUI server never kills in-flight subprocesses. On the next launch, t
 
 ## Security
 
-The server binds to `127.0.0.1` and requires no authentication by default. Binding to a non-loopback host requires `--token <hex>`, which becomes the bearer token required on every request.
+The server binds to `127.0.0.1` and requires no authentication by default. Binding to a non-loopback host requires `--token <hex>`, which becomes the bearer token required on every `/api/*` and `/sse/*` request. `/api/system/healthz` stays open so external monitoring still works.
+
+The browser presents the token in two ways:
+
+- **fetch requests** carry `Authorization: Bearer <token>` (preferred).
+- **`<img>` previews and SSE EventSource** can't attach custom headers, so the same token is accepted as `?token=<token>`. Treat HTTPS as a prerequisite for non-loopback deployments — query-string tokens appear in uvicorn / nginx access logs.
+
+To hand the token to the SPA on first load, append it to the page URL:
+
+```
+https://your-host/?token=<your-token>
+```
+
+The SPA captures the value, stores it in `sessionStorage`, strips it from the URL bar so it doesn't linger in browser history, and injects it on every subsequent request for the tab. Closing the tab clears the token.
 
 The GUI never sends data off your machine. No telemetry. No outgoing network requests.
 
