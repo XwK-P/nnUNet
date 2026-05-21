@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import logging
 import traceback
 from pathlib import Path
@@ -75,6 +76,53 @@ def create_app(cfg: GuiConfig) -> FastAPI:
     app.include_router(postproc_router.make_router())
 
     is_loopback = cfg.host in ("127.0.0.1", "localhost", "::1")
+
+    # When --token is set (mandatory for non-loopback in
+    # GuiConfig.from_env_and_args), require it on every /api/* request.
+    # The SPA static files and /api/system/healthz stay unauthenticated
+    # so the page can bootstrap and external monitors can liveness-check.
+    # Loopback deployments that didn't set a token keep the open
+    # behaviour they had before — the operator IS the user there.
+    if cfg.token is not None:
+        expected_header = f"Bearer {cfg.token}"
+
+        @app.middleware("http")
+        async def _enforce_bearer(request: Request, call_next):
+            path = request.url.path
+            # Gate everything reachable as API surface: REST under /api/*
+            # AND SSE under /sse/* (monitor.py mounts there). Healthz
+            # stays open for liveness probes; the SPA static files at
+            # / are unauthenticated so the user can load the page and
+            # supply their token.
+            protected = path.startswith("/api/") or path.startswith("/sse/")
+            if not protected or path == "/api/system/healthz":
+                return await call_next(request)
+            # CORS preflights carry no Authorization header by design.
+            if request.method == "OPTIONS":
+                return await call_next(request)
+            # Accept either an `Authorization: Bearer <token>` header
+            # (preferred, used by the SPA's fetch wrapper) or a
+            # `?token=<token>` query param. The query-param fallback is
+            # required for resources the browser loads without going
+            # through our fetch wrapper — <img src=...> for slice
+            # previews, EventSource for SSE — where custom headers
+            # cannot be attached. Tokens in URLs can leak via access
+            # logs; treat HTTPS as a prerequisite for non-loopback.
+            auth_header = request.headers.get("Authorization", "")
+            token_query = request.query_params.get("token", "")
+            header_ok = hmac.compare_digest(auth_header, expected_header)
+            query_ok = bool(token_query) and hmac.compare_digest(token_query, cfg.token)
+            if not (header_ok or query_ok):
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "kind": "unauthorized",
+                        "message": "Missing or invalid bearer token.",
+                        "retryable": False,
+                        "details": None,
+                    },
+                )
+            return await call_next(request)
 
     web_dir = Path(__file__).resolve().parent / "web"
     if (web_dir / "index.html").exists():

@@ -48,8 +48,64 @@ async function envelope(res: Response): Promise<never> {
   });
 }
 
+// Bearer token plumbing. The backend gates /api/* whenever the server
+// was started with --token. The SPA captures the token from the
+// initial URL (?token=xxx), persists it in sessionStorage, and strips
+// it from the location bar so it doesn't linger in browser history or
+// reload as a query-string artifact. fetch() requests carry it as
+// Authorization: Bearer; URL-loaded resources (<img src>, EventSource)
+// fall back to ?token= via `withToken()` because browsers can't
+// attach custom headers to those.
+const TOKEN_KEY = 'nnunet_gui_token';
+
+function captureTokenFromUrl(): void {
+  if (typeof window === 'undefined' || !window.location) return;
+  const url = new URL(window.location.href);
+  const t = url.searchParams.get('token');
+  if (!t) return;
+  try {
+    window.sessionStorage.setItem(TOKEN_KEY, t);
+  } catch {
+    /* sessionStorage unavailable; we'll still use the in-URL token below */
+  }
+  url.searchParams.delete('token');
+  window.history.replaceState({}, '', url.toString());
+}
+
+if (typeof window !== 'undefined') captureTokenFromUrl();
+
+export function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+// Append a token query param to a URL meant for <img>/EventSource. Skips
+// the no-op case so URLs stay clean when no token is configured.
+export function withToken(url: string): string {
+  const t = getStoredToken();
+  if (!t) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}token=${encodeURIComponent(t)}`;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const token = getStoredToken();
+  // Only rewrite init when we actually have a token to add. This keeps
+  // the no-token call shape identical to fetch(url, init) so callers
+  // and tests that assert on `init === undefined` still hold.
+  let finalInit: RequestInit | undefined = init;
+  if (token) {
+    const headers = new Headers(init?.headers ?? {});
+    if (!headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    finalInit = { ...init, headers };
+  }
+  const res = await fetch(url, finalInit);
   if (!res.ok) {
     await envelope(res);
   }
@@ -183,7 +239,9 @@ export const imageEndpoints = {
       q.set('window_lo', String(opts.window[0]));
       q.set('window_hi', String(opts.window[1]));
     }
-    return `/api/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}/preview?${q}`;
+    return withToken(
+      `/api/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}/preview?${q}`,
+    );
   },
 
   getCaseLabelsUrl: (
@@ -191,7 +249,9 @@ export const imageEndpoints = {
     opts: { axis: number; slice: number },
   ): string => {
     const q = new URLSearchParams({ axis: String(opts.axis), slice: String(opts.slice) });
-    return `/api/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}/labels?${q}`;
+    return withToken(
+      `/api/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}/labels?${q}`,
+    );
   },
 
   getPredictions: (runId: string): Promise<Prediction[]> =>
@@ -202,7 +262,7 @@ export const imageEndpoints = {
     opts: { axis: number; slice: number },
   ): string => {
     const q = new URLSearchParams({ axis: String(opts.axis), slice: String(opts.slice) });
-    return `/api/runs/${runId}/predictions/${encodeURIComponent(caseId)}?${q}`;
+    return withToken(`/api/runs/${runId}/predictions/${encodeURIComponent(caseId)}?${q}`);
   },
 
   // Folder-scoped preview for the Predict page, where the user pastes
@@ -217,7 +277,7 @@ export const imageEndpoints = {
       axis: String(opts.axis),
       slice: String(opts.slice),
     });
-    return `/api/predict/preview?${q}`;
+    return withToken(`/api/predict/preview?${q}`);
   },
 };
 

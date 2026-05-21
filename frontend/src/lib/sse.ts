@@ -1,3 +1,4 @@
+import { withToken } from './api';
 import type { RunEvent } from './types';
 
 export interface RunEventStream {
@@ -9,7 +10,10 @@ export interface RunEventStream {
 }
 
 export function connectRunEvents(runId: string): RunEventStream {
-  const es = new EventSource(`/sse/runs/${runId}/events`);
+  // EventSource can't attach Authorization headers, so we hand the
+  // token to the backend via ?token=<value>; the auth middleware
+  // accepts both forms.
+  const es = new EventSource(withToken(`/sse/runs/${runId}/events`));
   const metric: Array<(e: any) => void> = [];
   const log: Array<(e: any) => void> = [];
   const img: Array<(e: any) => void> = [];
