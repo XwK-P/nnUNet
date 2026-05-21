@@ -85,6 +85,21 @@ def make_router() -> APIRouter:
                 if not is_alive(j.pgid):
                     break
                 await asyncio.sleep(0.1)
+        if is_alive(j.pgid):
+            # Signals were delivered but the process group is still
+            # alive (permission edge case, container namespace,
+            # uninterruptable kernel state). Don't claim 'killed' —
+            # that would hide live GPU usage and mislead operators.
+            # Leave the row in its prior state; the reaper will
+            # transition it once the process actually exits.
+            raise HTTPException(
+                status_code=504,
+                detail=(
+                    f"sent SIGTERM and SIGKILL to pgid {j.pgid} but the "
+                    "process is still alive; retry or wait for the reaper "
+                    "to catch the exit"
+                ),
+            )
         update_job_status(
             cfg, job_id, status="killed",
             ended_at=datetime.now(timezone.utc),

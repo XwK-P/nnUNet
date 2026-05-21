@@ -57,6 +57,36 @@ def test_stop_unknown_job_404(populated_client):
     assert r.status_code == 404
 
 
+def test_stop_returns_504_when_process_survives_kill(populated_client, monkeypatch):
+    """If signal delivery succeeds but the process keeps running past
+    our SIGTERM+SIGKILL budget (permission edge case, container
+    namespace, uninterruptable kernel state), the row must NOT be
+    marked killed — that would hide live GPU usage. Surface 504 and
+    leave the status alone so the reaper can transition it later.
+    """
+    cfg = _cfg_from_client(populated_client)
+    j = insert_job(cfg, Job(
+        id=None, kind="train", args_json="[]",
+        pid=42, pgid=42, status="running",
+        started_at=None, ended_at=None, exit_code=None,
+        log_path=None, output_run_id=None,
+        created_by="gui", error_message=None, slot="global",
+    ))
+    # Stub signal delivery so terminate/kill_group are no-ops and
+    # is_alive always reports the process is still alive.
+    monkeypatch.setattr("nnunetv2.gui.routers.jobs.terminate", lambda pgid: None)
+    monkeypatch.setattr("nnunetv2.gui.routers.jobs.kill_group", lambda pgid: None)
+    monkeypatch.setattr("nnunetv2.gui.routers.jobs.is_alive", lambda pgid: True)
+    r = populated_client.post(f"/api/jobs/{j.id}/stop")
+    assert r.status_code == 504, r.text
+    body = r.json()
+    detail = body.get("detail") or body.get("message", "")
+    assert "still alive" in detail.lower()
+    # Crucially the row stays 'running' — we did not lie about killing it.
+    r2 = populated_client.get(f"/api/jobs/{j.id}")
+    assert r2.json()["status"] == "running"
+
+
 def test_stop_starting_without_pgid_returns_conflict_not_500(populated_client):
     """In the narrow window between status='starting' and the launcher
     writing pid/pgid back, /stop must not 500 the user. Surface 409 so
