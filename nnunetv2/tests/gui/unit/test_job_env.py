@@ -44,17 +44,38 @@ def test_job_env_injects_cfg_paths_into_env(tmp_path, monkeypatch):
     assert os.environ["nnUNet_raw"] == "/stale/raw"
 
 
-def test_job_env_preserves_other_env_vars(tmp_path, monkeypatch):
-    """Only the three nnUNet path vars are overridden; the rest of the
-    parent's env (PATH, HOME, CUDA_VISIBLE_DEVICES, etc.) must come
-    through unchanged so the child can locate binaries / GPUs.
+def test_job_env_passes_through_allowlisted_keys(tmp_path, monkeypatch):
+    """Process-bootstrap and GPU/threading env vars on JOB_ENV_KEYS pass
+    through; everything else (cloud keys, CI tokens, terminal state)
+    is dropped so unrelated secrets don't end up in state.db.
     """
     cfg = _make_cfg(tmp_path)
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1,2")
-    monkeypatch.setenv("MY_UNRELATED_VAR", "preserved")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("OMP_NUM_THREADS", "8")
+    monkeypatch.setenv("MY_UNRELATED_VAR", "should-not-leak")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "redacted")
     env = job_env(cfg)
+    # Allowlisted keys are present.
     assert env["CUDA_VISIBLE_DEVICES"] == "1,2"
-    assert env["MY_UNRELATED_VAR"] == "preserved"
+    assert env["PATH"] == "/usr/bin:/bin"
+    assert env["OMP_NUM_THREADS"] == "8"
+    # Non-allowlisted keys (including a deliberately scary one) are gone.
+    assert "MY_UNRELATED_VAR" not in env
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+
+
+def test_job_env_passes_through_nnunet_prefix(tmp_path, monkeypatch):
+    """Any env var starting with ``nnUNet_`` passes through so users
+    can tune runtime knobs (tb_logdir, n_proc_DA, etc.) without
+    extending the allowlist.
+    """
+    cfg = _make_cfg(tmp_path)
+    monkeypatch.setenv("nnUNet_tb_image_every_n_epochs", "1")
+    monkeypatch.setenv("nnUNet_compile", "0")
+    env = job_env(cfg)
+    assert env["nnUNet_tb_image_every_n_epochs"] == "1"
+    assert env["nnUNet_compile"] == "0"
 
 
 def test_job_env_sets_paths_even_when_env_missing(tmp_path, monkeypatch):

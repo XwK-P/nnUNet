@@ -97,11 +97,78 @@ def test_train_enqueue_uses_cfg_paths_in_job_env(
     )
     assert r.status_code == 201, r.text
     job_id = r.json()["job_ids"][0]
-    j = populated_client.get(f"/api/jobs/{job_id}").json()
-    env = json.loads(j["env_json"])
+    # env_json is intentionally not in the public Job response (it's
+    # internal-only since the captured launch env can carry
+    # CUDA_VISIBLE_DEVICES and absolute cfg paths). Read it from the DB
+    # via the internal helper to verify the cfg paths were injected.
+    from nnunetv2.gui.state.jobs import get_job as get_job_internal
+    stored = get_job_internal(populated_client.app.state.gui_config, job_id)
+    assert stored is not None and stored.env_json is not None
+    env = json.loads(stored.env_json)
     assert env["nnUNet_raw"] == str(populated_paths["raw"])
     assert env["nnUNet_preprocessed"] == str(populated_paths["preprocessed"])
     assert env["nnUNet_results"] == str(populated_paths["results"])
+
+
+def test_jobs_api_does_not_leak_env_json(
+    populated_client, monkeypatch
+):
+    """The /api/jobs and /api/jobs/{id} responses must not surface
+    env_json. Even after the allowlist trim, the captured env still
+    contains CUDA_VISIBLE_DEVICES and the GUI host's PATH; remote API
+    consumers don't need to see any of that.
+    """
+    monkeypatch.setattr(
+        "nnunetv2.gui.routers.train.render_train",
+        lambda req: _fake_argv(),
+    )
+    r = populated_client.post(
+        "/api/train",
+        json={"dataset_id": 27, "configuration": "3d_fullres", "folds": ["0"]},
+    )
+    assert r.status_code == 201
+    job_id = r.json()["job_ids"][0]
+    j = populated_client.get(f"/api/jobs/{job_id}").json()
+    assert "env_json" not in j, (
+        f"env_json must not be in the public Job response; got keys {list(j.keys())}"
+    )
+    listing = populated_client.get("/api/jobs").json()
+    assert all("env_json" not in row for row in listing)
+
+
+def test_job_env_persisted_only_allowlisted_keys(
+    populated_client, populated_paths, monkeypatch
+):
+    """A leaked secret in the GUI process env (AWS key, GH token) must
+    NOT end up in state.db's env_json. Only the JOB_ENV_KEYS /
+    JOB_ENV_PREFIXES allowlist (plus the three nnUNet path overrides)
+    is persisted.
+    """
+    import json
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "leak-me-please")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_leak")
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")  # known good
+    monkeypatch.setattr(
+        "nnunetv2.gui.routers.train.render_train",
+        lambda req: _fake_argv(),
+    )
+    r = populated_client.post(
+        "/api/train",
+        json={"dataset_id": 27, "configuration": "3d_fullres", "folds": ["0"]},
+    )
+    assert r.status_code == 201
+    job_id = r.json()["job_ids"][0]
+    from nnunetv2.gui.state.jobs import get_job as get_job_internal
+    stored = get_job_internal(populated_client.app.state.gui_config, job_id)
+    env = json.loads(stored.env_json)
+    assert "AWS_SECRET_ACCESS_KEY" not in env, (
+        f"unrelated secret leaked into env_json: keys={sorted(env.keys())}"
+    )
+    assert "GITHUB_TOKEN" not in env
+    # PATH is on the allowlist (the subprocess needs to find binaries).
+    assert env.get("PATH") == "/usr/local/bin:/usr/bin"
+    # And the cfg-driven path overrides are still present.
+    assert env["nnUNet_raw"] == str(populated_paths["raw"])
 
 
 def test_train_enqueue_persists_full_dataset_folder_in_output_run_id(

@@ -66,18 +66,53 @@ def _from_env(name: str) -> Optional[Path]:
     return Path(val) if val else None
 
 
+# Keys we copy from the GUI's process env into spawned children.
+# Deliberately tight: anything not on this list (or matching one of
+# JOB_ENV_PREFIXES below) is dropped so unrelated secrets — cloud
+# keys, CI tokens, browser cookies, terminal mux state — never reach
+# disk via state.db's env_json column or any API response.
+JOB_ENV_KEYS: tuple[str, ...] = (
+    # Process bootstrap
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL",
+    "TMPDIR", "TEMP", "TMP",
+    # Locale (matters for filesystem and Python text behaviour)
+    "LANG", "LC_ALL", "LC_CTYPE",
+    # GPU / accelerator
+    "CUDA_VISIBLE_DEVICES", "CUDA_HOME", "CUDA_PATH",
+    "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
+    "ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES",
+    "PYTORCH_CUDA_ALLOC_CONF",
+    # Threading / numerics
+    "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+    # Python runtime
+    "PYTHONPATH", "PYTHONUNBUFFERED", "VIRTUAL_ENV", "CONDA_PREFIX",
+    # Windows essentials so the spawned process can find DLLs and tmp.
+    "SYSTEMROOT", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+    "PROGRAMFILES", "PROGRAMFILES(X86)", "COMSPEC",
+)
+
+# Any env var whose name starts with these prefixes is copied through.
+# `nnUNet_*` lets users tune nnUNet runtime behaviour (e.g. tb_logdir,
+# n_proc_DA, image_every_n_epochs) without us having to enumerate
+# every knob.
+JOB_ENV_PREFIXES: tuple[str, ...] = ("nnUNet_",)
+
+
 def job_env(cfg: GuiConfig) -> dict[str, str]:
     """Build the env passed to spawned nnUNet CLIs.
 
-    nnunetv2/paths.py reads nnUNet_raw/preprocessed/results from
-    ``os.environ`` at import time in the child process, so the GUI's
-    own GuiConfig overrides (from ``nnUNetv2_gui --raw/--preprocessed
-    /--results``) must be re-injected into the env before launching a
-    job. Otherwise the child resolves paths from the unmodified parent
-    env, which may be missing or stale relative to what the GUI itself
-    used to find datasets/runs/results.
+    Only an allowlist (``JOB_ENV_KEYS`` plus ``JOB_ENV_PREFIXES``) is
+    copied from the GUI's process env into the child, then
+    ``nnUNet_raw``/``nnUNet_preprocessed``/``nnUNet_results`` are
+    overridden from ``GuiConfig`` so the spawned CLI resolves paths
+    the same way the GUI did. The full process env is *not* copied:
+    that would silently store unrelated secrets in ``state.db`` and
+    surface them on /api/jobs.
     """
-    env = os.environ.copy()
+    env: dict[str, str] = {}
+    for k, v in os.environ.items():
+        if k in JOB_ENV_KEYS or any(k.startswith(p) for p in JOB_ENV_PREFIXES):
+            env[k] = v
     env["nnUNet_raw"] = str(cfg.raw)
     env["nnUNet_preprocessed"] = str(cfg.preprocessed)
     env["nnUNet_results"] = str(cfg.results)

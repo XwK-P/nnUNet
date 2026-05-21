@@ -12,6 +12,12 @@ from nnunetv2.gui.db import job_table, session_scope
 
 
 class Job(BaseModel):
+    """Full internal job record. ``env_json`` is the launch env captured
+    at enqueue time (already filtered by ``config.job_env``); it is
+    persisted so :class:`JobQueue` can relaunch after a server restart,
+    but it must NOT leak to API consumers. Use :class:`JobPublic` as the
+    response_model for any externally reachable endpoint.
+    """
     id: Optional[int]
     kind: str
     args_json: str
@@ -27,6 +33,42 @@ class Job(BaseModel):
     error_message: Optional[str]
     slot: str = "global"
     env_json: Optional[str] = None
+
+
+class JobPublic(BaseModel):
+    """API-facing projection of :class:`Job` that omits ``env_json``.
+
+    Even though job_env now only stores an allowlisted subset (no AWS
+    keys, GH tokens etc.), the captured env still contains
+    ``CUDA_VISIBLE_DEVICES``, the absolute ``nnUNet_*`` paths, and the
+    GUI host's ``PATH`` — none of which a remote API consumer needs to
+    see. Keep it internal.
+    """
+    id: Optional[int]
+    kind: str
+    args_json: str
+    pid: Optional[int]
+    pgid: Optional[int]
+    status: str
+    started_at: Optional[datetime]
+    ended_at: Optional[datetime]
+    exit_code: Optional[int]
+    log_path: Optional[str]
+    output_run_id: Optional[str]
+    created_by: Optional[str]
+    error_message: Optional[str]
+    slot: str = "global"
+
+    @classmethod
+    def from_job(cls, job: "Job") -> "JobPublic":
+        return cls(
+            id=job.id, kind=job.kind, args_json=job.args_json,
+            pid=job.pid, pgid=job.pgid, status=job.status,
+            started_at=job.started_at, ended_at=job.ended_at,
+            exit_code=job.exit_code, log_path=job.log_path,
+            output_run_id=job.output_run_id, created_by=job.created_by,
+            error_message=job.error_message, slot=job.slot,
+        )
 
 
 class JobFilter(BaseModel):

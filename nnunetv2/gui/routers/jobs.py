@@ -11,26 +11,32 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from nnunetv2.gui.config import job_env
 from nnunetv2.gui.jobs.signals import is_alive, kill_group, terminate
-from nnunetv2.gui.state.jobs import Job, JobFilter, get_job, list_jobs, update_job_status
+from nnunetv2.gui.state.jobs import (
+    Job, JobFilter, JobPublic, get_job, list_jobs, update_job_status,
+)
 
 
 def make_router() -> APIRouter:
     router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
-    @router.get("", response_model=list[Job])
+    @router.get("", response_model=list[JobPublic])
     def list_all(
         request: Request,
         kind: Optional[str] = None,
         status: Optional[str] = None,
-    ) -> list[Job]:
-        return list_jobs(request.app.state.gui_config, JobFilter(kind=kind, status=status))
+    ) -> list[JobPublic]:
+        # JobPublic strips env_json before serialisation so the captured
+        # launch env (PATH, CUDA_VISIBLE_DEVICES, absolute cfg paths)
+        # doesn't leak through this endpoint.
+        rows = list_jobs(request.app.state.gui_config, JobFilter(kind=kind, status=status))
+        return [JobPublic.from_job(j) for j in rows]
 
-    @router.get("/{job_id}", response_model=Job)
-    def get_one(job_id: int, request: Request) -> Job:
+    @router.get("/{job_id}", response_model=JobPublic)
+    def get_one(job_id: int, request: Request) -> JobPublic:
         j = get_job(request.app.state.gui_config, job_id)
         if j is None:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-        return j
+        return JobPublic.from_job(j)
 
     @router.post("/{job_id}/stop")
     async def stop(job_id: int, request: Request) -> dict:
