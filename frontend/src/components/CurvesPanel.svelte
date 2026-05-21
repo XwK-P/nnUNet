@@ -1,10 +1,8 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
   import LineChart from '../lib/charts/LineChart.svelte';
   import { createRunStreamStore, type RunStreamState } from '../lib/stores/runStream';
 
   let { runId }: { runId: string } = $props();
-  let store: ReturnType<typeof createRunStreamStore> | null = null;
   let s = $state<RunStreamState>({ metrics: {}, log: [], imageSamples: [], connected: false });
 
   const KEYS = ['train_loss', 'val_loss', 'mean_fg_dice', 'learning_rate', 'epoch_duration'];
@@ -15,15 +13,20 @@
     return [m.steps, m.values];
   }
 
-  onMount(() => {
-    store = createRunStreamStore(runId);
+  // Recreate the SSE store every time runId changes — the parent
+  // mounts this component once and just swaps the prop when the user
+  // picks a different run, so an onMount-only setup would leave us
+  // listening to the previous run forever. The $effect cleanup tears
+  // down the old subscription and EventSource before the new one is
+  // built.
+  $effect(() => {
+    s = { metrics: {}, log: [], imageSamples: [], connected: false };
+    const store = createRunStreamStore(runId);
     const unsub = store.subscribe((next) => (s = next));
     return () => {
       unsub();
+      store.close();
     };
-  });
-  onDestroy(() => {
-    store?.close();
   });
 </script>
 

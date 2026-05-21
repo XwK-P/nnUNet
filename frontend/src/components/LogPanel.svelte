@@ -1,14 +1,17 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { tick } from 'svelte';
   import { createRunStreamStore, type RunStreamState } from '../lib/stores/runStream';
 
   let { runId }: { runId: string } = $props();
-  let store: ReturnType<typeof createRunStreamStore> | null = null;
   let s = $state<RunStreamState>({ metrics: {}, log: [], imageSamples: [], connected: false });
   let pre: HTMLPreElement | undefined = $state();
 
-  onMount(() => {
-    store = createRunStreamStore(runId);
+  // Recreate the SSE store every time runId changes. See CurvesPanel
+  // for the rationale: an onMount-only setup ignores prop swaps and
+  // keeps streaming the previous run.
+  $effect(() => {
+    s = { metrics: {}, log: [], imageSamples: [], connected: false };
+    const store = createRunStreamStore(runId);
     const unsub = store.subscribe(async (next) => {
       s = next;
       await tick();
@@ -16,10 +19,8 @@
     });
     return () => {
       unsub();
+      store.close();
     };
-  });
-  onDestroy(() => {
-    store?.close();
   });
 </script>
 
