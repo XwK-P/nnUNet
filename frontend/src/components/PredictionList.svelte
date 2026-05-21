@@ -10,6 +10,7 @@
   let slice = $state(0);
   let loading = $state(false);
   let error = $state<string | null>(null);
+  let shape = $state<[number, number, number] | null>(null);
 
   async function load(id: string) {
     loading = true; error = null;
@@ -29,6 +30,33 @@
   $effect(() => {
     if (runId) load(runId);
   });
+
+  // Reset the shape + slice when the user picks a new case, then fetch
+  // the actual volume dimensions so the slider's max is dataset-aware
+  // rather than capped at 255.
+  $effect(() => {
+    const sel = selected;
+    if (!sel || !runId) {
+      shape = null;
+      return;
+    }
+    shape = null;
+    slice = 0;
+    imageEndpoints
+      .getPredictionShape(runId, sel.case_id)
+      .then((res) => {
+        shape = res.shape;
+      })
+      .catch(() => {
+        shape = null;
+      });
+  });
+
+  // Derived slider bound. While shape is unknown (initial fetch in
+  // flight or the format doesn't expose shape), keep the slider
+  // disabled by collapsing max to 0 so the user doesn't pick an index
+  // that gets silently clamped server-side.
+  const sliceMax = $derived(shape ? Math.max(0, shape[axis] - 1) : 0);
 
   const previewUrl = $derived(
     selected ? imageEndpoints.getPredictionPreviewUrl(runId, selected.case_id, { axis, slice }) : null
@@ -66,8 +94,15 @@
               <option value={0}>Z</option><option value={1}>Y</option><option value={2}>X</option>
             </select></label>
             <label class="flex-1 flex items-center gap-2">Slice
-              <input type="range" min="0" max="255" bind:value={slice} class="flex-1" />
-              <span class="w-8 text-right">{slice}</span>
+              <input
+                type="range"
+                min="0"
+                max={sliceMax}
+                bind:value={slice}
+                disabled={shape === null}
+                class="flex-1"
+              />
+              <span class="w-12 text-right">{shape ? `${slice}/${sliceMax}` : '…'}</span>
             </label>
           </div>
           <Canvas2DViewer src={previewUrl} alt={selected.case_id} />

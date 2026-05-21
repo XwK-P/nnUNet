@@ -57,6 +57,28 @@ def test_predictions_on_unknown_run(client):
     assert r.status_code == 404
 
 
+def test_prediction_shape_returns_volume_dims(predictions_client, populated_nifti_paths):
+    """The PredictionList slider needs real per-axis bounds — the
+    backend must expose the volume shape of the selected prediction so
+    the frontend can bind max= correctly instead of hard-coding 255.
+    """
+    r = predictions_client.get(
+        "/api/runs/Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0/predictions/case_001/shape"
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "shape" in body
+    # populated_nifti_paths builds the prediction NIfTI with shape (8,16,16).
+    assert body["shape"] == [8, 16, 16]
+
+
+def test_prediction_shape_unknown_case_returns_404(predictions_client):
+    r = predictions_client.get(
+        "/api/runs/Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0/predictions/case_999/shape"
+    )
+    assert r.status_code == 404
+
+
 def test_prediction_preview_png_served_as_is(predictions_client, populated_nifti_paths):
     """A .png prediction is already a 2-D image; the preview must serve
     it verbatim rather than handing the file to the NIfTI loader (which

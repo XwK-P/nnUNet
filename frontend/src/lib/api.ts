@@ -270,6 +270,16 @@ export const imageEndpoints = {
   getPredictions: (runId: string): Promise<Prediction[]> =>
     api.get<Prediction[]>(`/api/runs/${encodePathId(runId)}/predictions`),
 
+  // Volume shape of the matched prediction file — the slider in
+  // PredictionList binds its max to (shape[axis] - 1) so navigation
+  // is honest on any dataset shape, not capped at 256.
+  getPredictionShape: (
+    runId: string, caseId: string,
+  ): Promise<{ shape: [number, number, number] }> =>
+    api.get<{ shape: [number, number, number] }>(
+      `/api/runs/${encodePathId(runId)}/predictions/${encodeURIComponent(caseId)}/shape`,
+    ),
+
   getPredictionPreviewUrl: (
     runId: string, caseId: string,
     opts: { axis: number; slice: number },

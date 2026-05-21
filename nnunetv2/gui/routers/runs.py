@@ -94,6 +94,45 @@ def make_router() -> APIRouter:
         window = (window_lo, window_hi) if (window_lo is not None and window_hi is not None) else None
         return render_prediction_preview(match, axis=axis, slice=slice, window=window)
 
+    @router.get("/{run_id:path}/predictions/{case_id}/shape")
+    def prediction_shape(run_id: str, case_id: str, request: Request) -> dict:
+        """Volume shape of the matched prediction file for ``case_id``.
+
+        The Predict viewer slider needs real per-axis bounds to keep
+        navigation honest on volumes whose extent differs from the
+        previous hard-coded 256 default. Re-uses
+        ``find_prediction_for_case`` so the same suffix-preference
+        rules apply. 415 (rather than 200 with a placeholder) for
+        formats we don't decode here, matching prediction_preview.
+        """
+        cfg = request.app.state.gui_config
+        run = get_run(cfg, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+        match = find_prediction_for_case(Path(run.output_folder) / "predictions", case_id)
+        if match is None:
+            raise HTTPException(status_code=404, detail=f"No prediction for {case_id!r}")
+        name_lower = match.name.lower()
+        if name_lower.endswith((".nii.gz", ".nii")):
+            from nnunetv2.gui.services.images import volume_shape
+            d0, d1, d2 = volume_shape(match)
+            return {"shape": [d0, d1, d2]}
+        if name_lower.endswith(".png"):
+            from PIL import Image
+            with Image.open(str(match)) as img:
+                w, h = img.size
+            return {"shape": [h, w, 1]}
+        if name_lower.endswith((".tif", ".tiff")):
+            from PIL import Image
+            with Image.open(str(match)) as img:
+                w, h = img.size
+                n_frames = int(getattr(img, "n_frames", 1))
+            return {"shape": [n_frames, h, w]}
+        raise HTTPException(
+            status_code=415,
+            detail=f"Shape not supported for {match.suffix!r}",
+        )
+
     @router.get("/{run_id:path}/metrics_history")
     def metrics_history(run_id: str, request: Request) -> list[dict]:
         cfg = request.app.state.gui_config
