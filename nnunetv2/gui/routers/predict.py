@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,7 @@ from nnunetv2.gui.services.cli_renderer import (
 from nnunetv2.gui.services.predictions import (
     find_prediction_for_case,
     render_prediction_preview,
+    strip_pred_suffix,
 )
 
 
@@ -84,18 +86,26 @@ def make_router() -> APIRouter:
         for entry in data.get("metric_per_case") or []:
             cid = entry.get("reference_file") or entry.get("case_id") or ""
             metrics = entry.get("metrics") or {}
-            # Average over all non-background label Dice values. Taking
-            # only the first one would report an arbitrary single-class
-            # score for multi-class datasets, which is what
-            # foreground_mean does for the dataset-level number.
+            # Average over all non-background label Dice values that are
+            # actually finite. nnUNet writes NaN for classes absent in a
+            # given case; including those poisons the mean to NaN and
+            # FastAPI's JSON encoder rejects non-finite floats, so the
+            # endpoint would 500 on common multiclass datasets.
             fg_dices: list[float] = []
             for label, m in metrics.items():
                 if label == "0":
                     continue
                 if isinstance(m, dict) and "Dice" in m:
-                    fg_dices.append(float(m["Dice"]))
+                    val = float(m["Dice"])
+                    if math.isfinite(val):
+                        fg_dices.append(val)
             dice = sum(fg_dices) / len(fg_dices) if fg_dices else None
-            cases.append({"case_id": Path(cid).name, "dice": dice})
+            # Strip the file extension from reference_file so the case_id
+            # the UI receives matches the suffix-stripped stems used by
+            # find_prediction_for_case in /api/predict/preview. Without
+            # this, clicking a row would 404 because "case_001.nii.gz"
+            # never equals the stored stem "case_001".
+            cases.append({"case_id": strip_pred_suffix(Path(cid).name), "dice": dice})
         return {"foreground_mean_dice": fg, "cases": cases}
 
     return router
