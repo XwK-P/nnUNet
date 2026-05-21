@@ -27,7 +27,20 @@
   const ALL_FOLDS = ['0', '1', '2', '3', '4', 'all'];
 
   function toggleFold(f: string) {
-    folds = folds.includes(f) ? folds.filter((x) => x !== f) : [...folds, f];
+    if (folds.includes(f)) {
+      folds = folds.filter((x) => x !== f);
+      return;
+    }
+    // 'all' selects the fold_all checkpoint specifically; combining it
+    // with numeric folds emits `-f 0 1 2 3 4 all` and nnUNetv2_predict
+    // then tries to load every listed checkpoint, which fails for any
+    // model that doesn't have fold_all on disk. Enforce mutual
+    // exclusivity in the UI so the request can't be malformed.
+    if (f === 'all') {
+      folds = ['all'];
+    } else {
+      folds = [...folds.filter((x) => x !== 'all'), f];
+    }
   }
 
   function selectConfig(c: string) {
