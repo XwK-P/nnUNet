@@ -80,18 +80,32 @@ def make_router() -> APIRouter:
             await asyncio.sleep(0.2)
         if is_alive(j.pgid):
             kill_group(j.pgid)
-            # Brief grace for SIGKILL to take effect
-            for _ in range(10):
-                if not is_alive(j.pgid):
-                    break
-                await asyncio.sleep(0.1)
+        # After SIGKILL, the kernel may still report the pgid alive for
+        # a moment while it transitions the child into a zombie waiting
+        # for the reaper to call proc.wait(). Poll up to 10s for either
+        # (a) the OS to drop the group from the proc table, or (b) the
+        # background reaper to record a terminal status — both mean the
+        # subprocess is effectively gone. Without this combined check,
+        # CI under load would flake into a false 504 even though the
+        # job had already died.
+        deadline = loop.time() + 10
+        terminal_states = ("killed", "failed", "completed", "cancelled", "unknown")
+        while loop.time() < deadline:
+            if not is_alive(j.pgid):
+                break
+            refreshed = get_job(cfg, job_id)
+            if refreshed is not None and refreshed.status in terminal_states:
+                # Reaper already transitioned the row; signals worked,
+                # we just lost the foot race against zombification.
+                return {"ok": True, "status": refreshed.status}
+            await asyncio.sleep(0.1)
         if is_alive(j.pgid):
             # Signals were delivered but the process group is still
-            # alive (permission edge case, container namespace,
-            # uninterruptable kernel state). Don't claim 'killed' —
-            # that would hide live GPU usage and mislead operators.
-            # Leave the row in its prior state; the reaper will
-            # transition it once the process actually exits.
+            # alive past the grace window (permission edge case,
+            # container namespace, uninterruptable kernel state).
+            # Don't claim 'killed' — that would hide live GPU usage
+            # and mislead operators. Leave the row in its prior state;
+            # the reaper will transition it once the process exits.
             raise HTTPException(
                 status_code=504,
                 detail=(
