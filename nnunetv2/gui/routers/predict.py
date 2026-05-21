@@ -81,7 +81,19 @@ def make_router() -> APIRouter:
             data = json.loads(fp.read_text())
         except (OSError, json.JSONDecodeError) as e:
             raise HTTPException(status_code=500, detail=f"failed to parse summary.json: {e}")
-        fg = (data.get("foreground_mean") or {}).get("Dice")
+        # foreground_mean.Dice can also be NaN/Inf when nnUNet's overall
+        # mean is undefined for the dataset. FastAPI's JSON encoder
+        # rejects non-finite floats, so leaving the raw value here
+        # would 500 the whole response even though per-case handling
+        # already filters NaNs. Emit None instead, which renders as
+        # "—" in the UI.
+        fg_raw = (data.get("foreground_mean") or {}).get("Dice")
+        try:
+            fg = float(fg_raw) if fg_raw is not None else None
+        except (TypeError, ValueError):
+            fg = None
+        if fg is not None and not math.isfinite(fg):
+            fg = None
         cases = []
         for entry in data.get("metric_per_case") or []:
             cid = entry.get("reference_file") or entry.get("case_id") or ""

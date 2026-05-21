@@ -115,6 +115,47 @@ def test_per_case_metrics_strips_file_extension_from_case_id(
     )
 
 
+def test_per_case_metrics_guards_foreground_mean_against_nan(
+    populated_paths, monkeypatch, tmp_path
+):
+    """nnUNet's overall foreground_mean.Dice can also land as NaN/Inf
+    when the whole dataset has no foreground voxels (or the run was a
+    degenerate edge case). The endpoint must convert that to None
+    instead of returning a raw non-finite float, because FastAPI's
+    JSON encoder 500s on the whole response otherwise — even when the
+    per-case path already filters non-finite values.
+    """
+    import json
+    from fastapi.testclient import TestClient
+    from nnunetv2.gui.config import GuiConfig
+    from nnunetv2.gui.server import create_app
+
+    monkeypatch.setenv("nnUNet_raw", str(populated_paths["raw"]))
+    monkeypatch.setenv("nnUNet_preprocessed", str(populated_paths["preprocessed"]))
+    monkeypatch.setenv("nnUNet_results", str(populated_paths["results"]))
+    pred_folder = tmp_path / "fg_nan"
+    pred_folder.mkdir()
+    summary = {
+        "foreground_mean": {"Dice": float("nan")},
+        "metric_per_case": [
+            {
+                "reference_file": "case_001.nii.gz",
+                "metrics": {"0": {"Dice": 0.99}, "1": {"Dice": 0.8}},
+            },
+        ],
+    }
+    (pred_folder / "summary.json").write_text(json.dumps(summary))
+    client = TestClient(create_app(GuiConfig.from_env_and_args(host="127.0.0.1", port=0, token=None)))
+    r = client.get(f"/api/predict/per_case_metrics?prediction_folder={pred_folder}")
+    assert r.status_code == 200, (
+        f"endpoint must not 500 on NaN foreground_mean.Dice; got {r.status_code} {r.text}"
+    )
+    body = r.json()
+    assert body["foreground_mean_dice"] is None
+    # Per-case path stays unaffected.
+    assert body["cases"][0]["dice"] == pytest.approx(0.8)
+
+
 def test_per_case_metrics_skips_nan_dice_in_aggregation(
     populated_paths, monkeypatch, tmp_path
 ):
