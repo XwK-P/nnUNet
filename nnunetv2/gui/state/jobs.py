@@ -96,6 +96,32 @@ def claim_queued_for_launch(cfg: GuiConfig, job_id: int) -> bool:
     return (result.rowcount or 0) > 0
 
 
+def claim_queued_for_cancel(
+    cfg: GuiConfig, job_id: int, *, ended_at: datetime,
+) -> bool:
+    """Atomically transition ``queued`` -> ``cancelled`` for a single row.
+
+    Mirrors :func:`claim_queued_for_launch` for the opposite side of the
+    race: only marks the row as cancelled if it is still ``queued`` at
+    UPDATE time. If a worker won ``claim_queued_for_launch`` first the
+    row is already ``starting`` and this returns False, so the caller
+    knows it must surface the cancel as a no-op (the user can still
+    /stop the running job). Without this guard, ``cancel`` could
+    overwrite ``starting`` -> ``cancelled`` while the worker was
+    spawning the subprocess, leaving an unkillable orphan process whose
+    row is marked cancelled.
+    """
+    stmt = (
+        job_table.update()
+        .where(job_table.c.id == job_id)
+        .where(job_table.c.status == "queued")
+        .values(status="cancelled", ended_at=ended_at)
+    )
+    with session_scope(cfg) as s:
+        result = s.execute(stmt)
+    return (result.rowcount or 0) > 0
+
+
 def update_job_status(
     cfg: GuiConfig, job_id: int, *,
     status: Optional[str] = None,

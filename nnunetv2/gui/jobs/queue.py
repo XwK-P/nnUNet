@@ -20,6 +20,7 @@ from nnunetv2.gui.jobs.reaper import run_reaper
 from nnunetv2.gui.state.jobs import (
     Job,
     JobFilter,
+    claim_queued_for_cancel,
     claim_queued_for_launch,
     get_job,
     insert_job,
@@ -137,13 +138,21 @@ class JobQueue:
         return candidates[-1]
 
     async def cancel(self, job_id: int) -> bool:
-        """Cancel a queued job. Returns False if the job is no longer queued."""
-        j = get_job(self.cfg, job_id)
-        if j is None or j.status != "queued":
-            return False
-        update_job_status(self.cfg, job_id, status="cancelled",
-                          ended_at=datetime.now(timezone.utc))
-        return True
+        """Cancel a queued job.
+
+        Returns False if the job is no longer queued (already started,
+        already cancelled, or gone). The state transition is a single
+        atomic UPDATE ... WHERE status='queued' so it races safely with
+        ``claim_queued_for_launch`` in ``_launch_in_place``: at most one
+        of {cancel, launch} can win on a given row. The previous
+        non-atomic read-then-update could overwrite ``starting``
+        (claimed by the worker) -> ``cancelled`` while the subprocess
+        was already being spawned, producing an unkillable orphan
+        process whose DB row reads cancelled.
+        """
+        return claim_queued_for_cancel(
+            self.cfg, job_id, ended_at=datetime.now(timezone.utc),
+        )
 
     async def kickstart_pending(self) -> int:
         """Resume queued slots after a server restart.

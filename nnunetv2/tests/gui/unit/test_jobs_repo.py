@@ -107,6 +107,42 @@ def test_claim_queued_for_launch_rejects_cancelled_row(gui_config):
     assert fetched.status == "cancelled"
 
 
+def test_claim_queued_for_cancel_returns_true_only_once(gui_config):
+    """Cancel mirrors the launch CAS: only the first attempt wins; a
+    duplicate (or post-launch) cancel must observe rowcount=0 even
+    though the row id is still valid.
+    """
+    from nnunetv2.gui.state.jobs import claim_queued_for_cancel
+    init_db(gui_config)
+    j = insert_job(gui_config, _make(status="queued"))
+    ended = datetime(2026, 5, 21, 4, 30, tzinfo=timezone.utc)
+    assert claim_queued_for_cancel(gui_config, j.id, ended_at=ended) is True
+    assert claim_queued_for_cancel(gui_config, j.id, ended_at=ended) is False
+    fetched = get_job(gui_config, j.id)
+    assert fetched.status == "cancelled"
+    assert fetched.ended_at is not None
+
+
+def test_cancel_loses_when_launch_already_claimed_the_row(gui_config):
+    """If the worker's claim_queued_for_launch wins first, a follow-up
+    cancel must NOT succeed (and must not overwrite ``starting`` to
+    ``cancelled``). Without this guard, a successful cancel that races
+    a successful claim would leave the DB row marked cancelled while
+    the subprocess was already being spawned — an unkillable orphan.
+    """
+    from nnunetv2.gui.state.jobs import (
+        claim_queued_for_cancel, claim_queued_for_launch,
+    )
+    init_db(gui_config)
+    j = insert_job(gui_config, _make(status="queued"))
+    assert claim_queued_for_launch(gui_config, j.id) is True
+    ended = datetime(2026, 5, 21, 4, 31, tzinfo=timezone.utc)
+    assert claim_queued_for_cancel(gui_config, j.id, ended_at=ended) is False
+    fetched = get_job(gui_config, j.id)
+    assert fetched.status == "starting"
+    assert fetched.ended_at is None
+
+
 def test_init_db_migrates_legacy_job_table(gui_config):
     """A state.db from an older install will have a `job` table that
     lacks both `slot` and `env_json`. init_db must add the missing
