@@ -34,6 +34,11 @@ class JobQueue:
         self.cfg = cfg
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._tasks: set[asyncio.Task] = set()
+        # Strong refs to live Popen instances so CPython's subprocess
+        # ._active cleanup can't reap our children between Popen
+        # returning and the reaper calling wait(). Cleared in
+        # _worker_kick after the reaper has observed the exit code.
+        self._procs: dict[int, subprocess.Popen] = {}
 
     async def enqueue(
         self,
@@ -74,7 +79,17 @@ class JobQueue:
                 # Reaper runs inline so the lock is held until exit (serial).
                 if next_job.pid is None:
                     continue  # spawn failed; row marked failed by launcher
-                await run_reaper(self.cfg, next_job.id, next_job.pid)
+                # Hand the Popen handle to the reaper so proc.wait() is the
+                # canonical exit-code source; subprocess._active can't reap
+                # the child first. Drop our strong ref afterwards so the
+                # subprocess object can finally GC.
+                proc = self._procs.pop(next_job.id, None)
+                try:
+                    await run_reaper(self.cfg, next_job.id, next_job.pid, proc=proc)
+                finally:
+                    # Defensive: if we never put it in (or someone else
+                    # popped it), this is a no-op.
+                    self._procs.pop(next_job.id, None)
 
     async def _launch_in_place(self, queued: Job) -> None:
         """Promote a queued row to running by spawning the subprocess.
@@ -122,6 +137,9 @@ class JobQueue:
             queued.pid = proc.pid
             queued.pgid = pgid
             queued.status = "running"
+            # Retain the Popen handle so the reaper can wait on it. See
+            # __init__: dropped after _worker_kick observes exit.
+            self._procs[queued.id] = proc
         except Exception as e:
             update_job_status(self.cfg, queued.id, status="failed",
                               ended_at=datetime.now(timezone.utc),

@@ -1,8 +1,10 @@
 """Reaper supervises spawned processes and updates job status on exit.
 
-run_reaper(cfg, job_id, pid):
-  Spawns a thread executor task awaiting os.waitpid (POSIX) or psutil wait
-  (cross-platform), then transitions the row.
+run_reaper(cfg, job_id, pid, proc=None):
+  Spawns a thread executor task awaiting the subprocess. When `proc`
+  (the live Popen handle) is provided we use proc.wait() and get a
+  definitive exit code; otherwise we fall back to psutil/os.waitpid
+  (the attach_on_boot path, where the process isn't our child).
 
 attach_on_boot(cfg):
   Walks all non-terminal jobs and either schedules a reaper coroutine
@@ -12,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -21,20 +24,40 @@ from nnunetv2.gui.jobs.signals import is_alive
 from nnunetv2.gui.state.jobs import Job, JobFilter, get_job, list_jobs, update_job_status
 
 
-def _wait_process_blocking(pid: int) -> Optional[int]:
+def _wait_process_blocking(
+    pid: int, proc: Optional[subprocess.Popen] = None,
+) -> Optional[int]:
     """Block until pid exits; return exit code, or None if it cannot be determined.
+
+    When ``proc`` is supplied we use its .wait() directly. Without that,
+    CPython's ``subprocess._active`` cleanup can reap the child between
+    Popen returning and the reaper running, leaving psutil with a
+    NoSuchProcess race and returning None for in-flight children — the
+    cause of intermittent ``status='unknown'`` (and lost exit codes on
+    /stop) on busy CI boxes.
 
     Returns:
       * int (incl. negative for POSIX signal-termination):
-          definitive exit status, observed because pid was our child.
+          definitive exit status, observed because we held the Popen
+          handle (or pid was otherwise our child).
       * None:
-          we waited for pid to leave the proc table but could not read its
-          exit code — e.g. attach_on_boot is following a process from a
-          previous server boot, so it isn't a child of this process and
-          neither psutil.Process.wait() nor os.waitpid will return a status.
-          Callers should fall back to disk evidence rather than treating
-          this as "failed".
+          we waited for pid to leave the proc table but could not read
+          its exit code — e.g. attach_on_boot is following a process
+          from a previous server boot, so it isn't a child of this
+          process and neither psutil.Process.wait() nor os.waitpid will
+          return a status. Callers should fall back to disk evidence
+          rather than treating this as "failed".
     """
+    if proc is not None:
+        # Authoritative path: the Popen handle ensures the child is
+        # ours and gives us its exit code without racing the GC's
+        # subprocess._active cleanup. Returncode is signed for POSIX
+        # signal termination (e.g. -15 for SIGTERM).
+        try:
+            return int(proc.wait())
+        except Exception:
+            return None
+
     try:
         import psutil
     except ImportError:
@@ -72,7 +95,10 @@ def _wait_process_blocking(pid: int) -> Optional[int]:
     return None
 
 
-async def run_reaper(cfg: GuiConfig, job_id: int, pid: Optional[int]) -> None:
+async def run_reaper(
+    cfg: GuiConfig, job_id: int, pid: Optional[int],
+    *, proc: Optional[subprocess.Popen] = None,
+) -> None:
     """Await `pid` exit and write the terminal status row.
 
     Three branches:
@@ -90,7 +116,9 @@ async def run_reaper(cfg: GuiConfig, job_id: int, pid: Optional[int]) -> None:
     if pid is None:
         return
     loop = asyncio.get_running_loop()
-    exit_code = await loop.run_in_executor(None, _wait_process_blocking, pid)
+    exit_code = await loop.run_in_executor(
+        None, _wait_process_blocking, pid, proc,
+    )
     cur = get_job(cfg, job_id)
     if cur is not None and cur.status in ("killed", "cancelled"):
         if exit_code is not None:

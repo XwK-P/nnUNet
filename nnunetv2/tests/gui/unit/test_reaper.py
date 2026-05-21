@@ -25,6 +25,51 @@ async def test_reaper_marks_completed_on_clean_exit(gui_config):
 
 
 @pytest.mark.asyncio
+async def test_reaper_uses_proc_wait_when_handle_is_provided(gui_config):
+    """If JobQueue hands the Popen handle to run_reaper, it must call
+    proc.wait() instead of going through psutil. proc.wait() is
+    authoritative even after the child has been reaped by CPython's
+    subprocess._active cleanup (the race that produced the recent
+    CI flake where status='unknown' replaced 'completed').
+
+    We simulate that race here by sleeping past the child's exit AND
+    deliberately picking a pid the test process never owned (psutil
+    would return None for unknown pid). The reaper should still
+    transition the row to 'completed' because proc.wait() gives the
+    real exit code.
+    """
+    import subprocess
+    import time
+    from nnunetv2.gui.state.jobs import insert_job
+
+    init_db(gui_config)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.exit(0)"],
+    )
+    real_pid = proc.pid
+    proc.wait(timeout=5)  # let the child exit and become a zombie/reaped
+    time.sleep(0.05)
+    j = insert_job(gui_config, Job(
+        id=None, kind="train", args_json="[]",
+        pid=real_pid, pgid=real_pid, status="running",
+        started_at=None, ended_at=None, exit_code=None,
+        log_path=None, output_run_id=None,
+        created_by="gui", error_message=None, slot="global",
+    ))
+    # With proc handed in, the reaper takes proc.wait() -> 0 (already
+    # waited; subprocess caches returncode), so we get 'completed'
+    # rather than 'unknown' from disk-evidence fallback.
+    await asyncio.wait_for(
+        run_reaper(gui_config, j.id, real_pid, proc=proc), timeout=5,
+    )
+    fetched = get_job(gui_config, j.id)
+    assert fetched.status == "completed", (
+        f"with Popen handle, run_reaper must use proc.wait(); got {fetched.status}"
+    )
+    assert fetched.exit_code == 0
+
+
+@pytest.mark.asyncio
 async def test_reaper_marks_failed_on_nonzero_exit(gui_config):
     init_db(gui_config)
     argv = [sys.executable, "-m", "nnunetv2.tests.gui.helpers.sleep_helper", "0.1", "3"]
@@ -60,7 +105,7 @@ async def test_reaper_uses_disk_evidence_when_exit_code_unknown(gui_config, monk
     # Force _wait_process_blocking → None (the "non-child" case).
     monkeypatch.setattr(
         "nnunetv2.gui.jobs.reaper._wait_process_blocking",
-        lambda pid: None,
+        lambda pid, proc=None: None,
     )
     await asyncio.wait_for(run_reaper(gui_config, j.id, j.pid), timeout=5)
     fetched = get_job(gui_config, j.id)
@@ -81,7 +126,7 @@ async def test_reaper_unknown_when_no_disk_evidence_and_no_exit_code(gui_config,
     ))
     monkeypatch.setattr(
         "nnunetv2.gui.jobs.reaper._wait_process_blocking",
-        lambda pid: None,
+        lambda pid, proc=None: None,
     )
     await asyncio.wait_for(run_reaper(gui_config, j.id, j.pid), timeout=5)
     fetched = get_job(gui_config, j.id)
