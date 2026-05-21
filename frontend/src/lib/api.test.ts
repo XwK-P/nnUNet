@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { api, ApiError, getStoredToken, withToken } from './api';
+import { api, ApiError, encodePathId, endpoints, getStoredToken, imageEndpoints, withToken } from './api';
 
 const TOKEN_KEY = 'nnunet_gui_token';
 
@@ -111,5 +111,36 @@ describe('api client', () => {
     expect(getStoredToken()).toBeNull();
     window.sessionStorage.setItem(TOKEN_KEY, 'xyz');
     expect(getStoredToken()).toBe('xyz');
+  });
+
+  it('encodePathId preserves slash separators while encoding segments', () => {
+    expect(encodePathId('Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0')).toBe(
+      'Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0',
+    );
+    // Spaces, #, ?, % in dataset names — each segment must be encoded
+    // independently so reserved chars don't truncate the URL or be
+    // reinterpreted as query/fragment by the browser.
+    expect(encodePathId('Dataset027_With Space/foo#bar/fold_0')).toBe(
+      'Dataset027_With%20Space/foo%23bar/fold_0',
+    );
+    expect(encodePathId('a?b/c%d')).toBe('a%3Fb/c%25d');
+  });
+
+  it('endpoints.getRun encodes the id before interpolating', async () => {
+    const mock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', mock);
+    await endpoints.getRun('Ds_With Space/foo#bar/fold_0');
+    const [url] = mock.mock.calls[0];
+    expect(url).toBe('/api/runs/Ds_With%20Space/foo%23bar/fold_0');
+  });
+
+  it('imageEndpoints.getPredictionPreviewUrl encodes run id and case id', () => {
+    const url = imageEndpoints.getPredictionPreviewUrl(
+      'Ds#X/Plans__Trainer__cfg/fold_0',
+      'case 001',
+      { axis: 0, slice: 4 },
+    );
+    expect(url).toContain('/api/runs/Ds%23X/Plans__Trainer__cfg/fold_0/predictions/');
+    expect(url).toContain('case%20001');
   });
 });

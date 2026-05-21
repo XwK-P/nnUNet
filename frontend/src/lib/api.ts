@@ -170,6 +170,19 @@ function qs(params: Record<string, string | undefined>): string {
   return s ? `?${s}` : '';
 }
 
+// Percent-encode a composite path id (run id, model id) while
+// preserving the '/' separators. Raw interpolation breaks whenever a
+// dataset name contains reserved URL chars (#, ?, %, space): the
+// browser will truncate at # (fragment), reinterpret ? as the start of
+// the query string, etc., and the request never reaches the right
+// route on the server. encodeURIComponent on the whole id would also
+// be wrong because it escapes the separator slashes — backend routes
+// expect literal '/' to split run_id into dataset/plans/configuration/
+// fold segments. Split + encode + join handles both correctly.
+export function encodePathId(id: string): string {
+  return id.split('/').map(encodeURIComponent).join('/');
+}
+
 export const endpoints = {
   getDatasets: () => api.get<Dataset[]>('/api/datasets'),
   getDataset: (id: string) => api.get<Dataset>(`/api/datasets/${encodeURIComponent(id)}`),
@@ -179,7 +192,7 @@ export const endpoints = {
     api.get<Record<string, unknown>>(`/api/datasets/${encodeURIComponent(id)}/fingerprint`),
   getRuns: (filter: RunFilter = {}) =>
     api.get<Run[]>(`/api/runs${qs(filter as Record<string, string | undefined>)}`),
-  getRun: (id: string) => api.get<Run>(`/api/runs/${id}`),
+  getRun: (id: string) => api.get<Run>(`/api/runs/${encodePathId(id)}`),
   getDashboard: () => api.get<DashboardData>('/api/dashboard'),
   getCompare: (runIds: string[], metricKeys?: string[]) => {
     const params = new URLSearchParams();
@@ -189,7 +202,7 @@ export const endpoints = {
     return api.get<CompareResponse>(`/api/compare${q ? `?${q}` : ''}`);
   },
   getModels: (): Promise<Model[]> => api.get<Model[]>('/api/models'),
-  getModel: (id: string): Promise<Model> => api.get<Model>(`/api/models/${id}`),
+  getModel: (id: string): Promise<Model> => api.get<Model>(`/api/models/${encodePathId(id)}`),
   getPerCaseMetrics: (predictionFolder: string): Promise<PerCaseMetricsResponse> =>
     api.get<PerCaseMetricsResponse>(
       `/api/predict/per_case_metrics?prediction_folder=${encodeURIComponent(predictionFolder)}`,
@@ -210,7 +223,7 @@ export const endpoints = {
   putLogLevel: (level: LogLevel): Promise<{ level: LogLevel }> =>
     api.put<{ level: LogLevel }>('/api/system/log_level', { level }),
   updateRun: (id: string, body: RunUpdateRequest): Promise<Run> =>
-    api.put<Run>(`/api/runs/${id}`, body),
+    api.put<Run>(`/api/runs/${encodePathId(id)}`, body),
   getJobs: (): Promise<Job[]> => api.get<Job[]>('/api/jobs'),
 };
 
@@ -255,14 +268,14 @@ export const imageEndpoints = {
   },
 
   getPredictions: (runId: string): Promise<Prediction[]> =>
-    api.get<Prediction[]>(`/api/runs/${runId}/predictions`),
+    api.get<Prediction[]>(`/api/runs/${encodePathId(runId)}/predictions`),
 
   getPredictionPreviewUrl: (
     runId: string, caseId: string,
     opts: { axis: number; slice: number },
   ): string => {
     const q = new URLSearchParams({ axis: String(opts.axis), slice: String(opts.slice) });
-    return withToken(`/api/runs/${runId}/predictions/${encodeURIComponent(caseId)}?${q}`);
+    return withToken(`/api/runs/${encodePathId(runId)}/predictions/${encodeURIComponent(caseId)}?${q}`);
   },
 
   // Folder-scoped preview for the Predict page, where the user pastes

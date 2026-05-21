@@ -1,4 +1,4 @@
-import { withToken } from './api';
+import { encodePathId, withToken } from './api';
 import type { RunEvent } from './types';
 
 export interface RunEventStream {
@@ -12,8 +12,10 @@ export interface RunEventStream {
 export function connectRunEvents(runId: string): RunEventStream {
   // EventSource can't attach Authorization headers, so we hand the
   // token to the backend via ?token=<value>; the auth middleware
-  // accepts both forms.
-  const es = new EventSource(withToken(`/sse/runs/${runId}/events`));
+  // accepts both forms. The run id is a composite path
+  // (dataset/plans__trainer__cfg/fold_N) — encode each segment so
+  // reserved chars in user-chosen dataset names don't break routing.
+  const es = new EventSource(withToken(`/sse/runs/${encodePathId(runId)}/events`));
   const metric: Array<(e: any) => void> = [];
   const log: Array<(e: any) => void> = [];
   const img: Array<(e: any) => void> = [];
