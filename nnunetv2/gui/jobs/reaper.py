@@ -95,13 +95,38 @@ def _wait_process_blocking(
     return None
 
 
+def _wait_group_blocking(pgid: int, poll_interval: float = 0.5) -> None:
+    """Block until the process group ``pgid`` has no live members.
+
+    Used when ``attach_on_boot`` detected the group is alive but the
+    original leader pid is dead (DDP / torchrun: leader exits before
+    its worker children). We can't read the workers' exit codes (not
+    our children), so the caller falls back to disk evidence.
+    """
+    import time
+    while is_alive(pgid):
+        time.sleep(poll_interval)
+
+
 async def run_reaper(
     cfg: GuiConfig, job_id: int, pid: Optional[int],
     *, proc: Optional[subprocess.Popen] = None,
+    wait_pgid: Optional[int] = None,
 ) -> None:
-    """Await `pid` exit and write the terminal status row.
+    """Await process exit and write the terminal status row.
 
-    Three branches:
+    Wait modes (one of):
+      * ``proc``: hold the Popen handle and call proc.wait(). Authoritative
+        exit code, no zombie race with subprocess._active. Used for jobs
+        we launched via JobQueue.
+      * ``wait_pgid``: poll the entire process group until empty. Used
+        when the leader pid has already exited (re-attached DDP run
+        whose group children are still working). Exit code is None;
+        the disk-evidence branch handles the terminal status.
+      * neither: psutil.Process(pid).wait() (cross-platform fallback;
+        returns None for non-children).
+
+    Three terminal branches:
       1. Row was already moved into a terminal state by the stop/cancel
          handler (status == 'killed' or 'cancelled'): record the observed
          exit code for diagnostics only; leave status + ended_at alone.
@@ -113,12 +138,17 @@ async def run_reaper(
          returns 'completed' when the disk indicates success, otherwise
          'unknown' so an operator can reconcile from the Jobs page.
     """
-    if pid is None:
+    if pid is None and wait_pgid is None:
         return
     loop = asyncio.get_running_loop()
-    exit_code = await loop.run_in_executor(
-        None, _wait_process_blocking, pid, proc,
-    )
+    if wait_pgid is not None:
+        # Poll the group; no exit code available for non-child workers.
+        await loop.run_in_executor(None, _wait_group_blocking, wait_pgid)
+        exit_code: Optional[int] = None
+    else:
+        exit_code = await loop.run_in_executor(
+            None, _wait_process_blocking, pid, proc,
+        )
     cur = get_job(cfg, job_id)
     if cur is not None and cur.status in ("killed", "cancelled"):
         if exit_code is not None:
@@ -186,7 +216,19 @@ async def attach_on_boot(cfg: GuiConfig) -> list[asyncio.Task]:
         # signals.spawn stores pid==pgid and this just falls through.
         probe = job.pgid if job.pgid else job.pid
         if is_alive(probe):
-            task = asyncio.create_task(run_reaper(cfg, job.id, job.pid))
+            # If the leader pid is dead but the group is still alive,
+            # waiting on pid would return immediately (psutil
+            # NoSuchProcess) and the reaper would terminalise the row
+            # while workers are still running. Wait on the GROUP
+            # instead — _wait_group_blocking polls until killpg(pgid,
+            # 0) drops, then the disk-evidence branch decides the
+            # final status.
+            if job.pgid and job.pgid != job.pid and not is_alive(job.pid):
+                task = asyncio.create_task(
+                    run_reaper(cfg, job.id, job.pid, wait_pgid=job.pgid)
+                )
+            else:
+                task = asyncio.create_task(run_reaper(cfg, job.id, job.pid))
             scheduled.append(task)
         else:
             terminal = _disk_evidence_terminal_status(cfg, job)

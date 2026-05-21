@@ -187,6 +187,87 @@ async def test_attach_on_boot_reattaches_live_pid(gui_config):
 
 
 @pytest.mark.asyncio
+async def test_attach_on_boot_waits_group_when_leader_pid_is_dead(gui_config, monkeypatch):
+    """When the recorded leader pid is dead but the pgid still has live
+    children (DDP / torchrun after the launcher exits), the reaper must
+    wait on the GROUP — waiting on the dead pid would return None
+    immediately and terminalise the row while workers are still
+    running.
+
+    Stub is_alive so only the pgid registers as alive, capture the
+    wait_pgid kwarg passed to run_reaper, and assert it matches.
+    """
+    init_db(gui_config)
+    dead_pid, alive_pgid = 700001, 700099
+    j = insert_job(gui_config, Job(
+        id=None, kind="train", args_json="[]",
+        pid=dead_pid, pgid=alive_pgid, status="running",
+        started_at=None, ended_at=None, exit_code=None,
+        log_path=None, output_run_id=None,
+        created_by="gui", error_message=None, slot="global",
+    ))
+
+    def fake_is_alive(probe: int) -> bool:
+        return probe == alive_pgid  # pid is dead
+
+    captured: dict = {}
+
+    async def fake_reaper(cfg, job_id, pid, *, proc=None, wait_pgid=None):
+        captured["pid"] = pid
+        captured["wait_pgid"] = wait_pgid
+
+    monkeypatch.setattr("nnunetv2.gui.jobs.reaper.is_alive", fake_is_alive)
+    monkeypatch.setattr("nnunetv2.gui.jobs.reaper.run_reaper", fake_reaper)
+
+    tasks = await attach_on_boot(gui_config)
+    assert len(tasks) == 1
+    await asyncio.wait_for(asyncio.gather(*tasks), timeout=2)
+    # The reaper was instructed to wait on the GROUP, not the dead pid.
+    assert captured["wait_pgid"] == alive_pgid, (
+        f"expected wait_pgid={alive_pgid}, got {captured}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_reaper_with_wait_pgid_polls_until_group_drops(gui_config, monkeypatch):
+    """run_reaper(..., wait_pgid=N) must block until is_alive(N) is
+    False, then go through the disk-evidence branch (because exit code
+    is unrecoverable for non-child workers).
+    """
+    init_db(gui_config)
+    j = insert_job(gui_config, Job(
+        id=None, kind="predict", args_json="[]",
+        pid=500001, pgid=500099, status="running",
+        started_at=None, ended_at=None, exit_code=None,
+        log_path=None, output_run_id=None,
+        created_by="gui", error_message=None, slot="global",
+    ))
+    # Group reports alive for the first probe, then dead.
+    state = {"calls": 0}
+
+    def is_alive_then_drop(probe: int) -> bool:
+        state["calls"] += 1
+        return state["calls"] <= 1
+
+    monkeypatch.setattr("nnunetv2.gui.jobs.reaper.is_alive", is_alive_then_drop)
+    # Shorten the poll so the test isn't a 0.5s sleep.
+    import nnunetv2.gui.jobs.reaper as reaper_mod
+    real_wait = reaper_mod._wait_group_blocking
+    monkeypatch.setattr(
+        reaper_mod, "_wait_group_blocking",
+        lambda pgid, poll_interval=0.01: real_wait(pgid, poll_interval=0.01),
+    )
+
+    await asyncio.wait_for(
+        run_reaper(gui_config, j.id, j.pid, wait_pgid=j.pgid), timeout=2
+    )
+    fetched = get_job(gui_config, j.id)
+    # No exit code available; disk-evidence falls through to 'unknown'
+    # for a predict job (no checkpoint_final.pth to look at).
+    assert fetched.status == "unknown"
+
+
+@pytest.mark.asyncio
 async def test_attach_on_boot_probes_pgid_not_pid(gui_config, monkeypatch):
     """The reattach liveness check must probe the process *group*, not
     the bare pid. A DDP / torchrun training whose group leader has
@@ -222,9 +303,11 @@ async def test_attach_on_boot_probes_pgid_not_pid(gui_config, monkeypatch):
     monkeypatch.setattr("nnunetv2.gui.jobs.reaper.run_reaper", noop_reaper)
 
     tasks = await attach_on_boot(gui_config)
-    # Probed the pgid, not the pid.
-    assert probed == [alive_pgid], (
-        f"expected attach_on_boot to probe the pgid {alive_pgid}, got {probed}"
+    # First probe must be the pgid (the load-bearing one); a second
+    # probe of pid is fine — it's how the new code decides whether
+    # the leader is dead and the reaper needs group-polling.
+    assert probed and probed[0] == alive_pgid, (
+        f"expected attach_on_boot to probe the pgid {alive_pgid} first, got {probed}"
     )
     # And scheduled a reaper for the still-live group.
     assert len(tasks) == 1
