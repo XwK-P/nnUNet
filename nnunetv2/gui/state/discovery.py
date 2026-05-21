@@ -35,6 +35,33 @@ class DiscoveredRun:
     status: str  # 'completed' | 'abandoned'
 
 
+def resolve_dataset_folder(
+    raw_root: Path, preprocessed_root: Path, results_root: Path,
+    dataset_id_int: int,
+) -> Optional[str]:
+    """Return the full ``Dataset<NNN>_<Name>`` folder name for an int id.
+
+    nnUNet keys runs and checkpoints by the full folder name (e.g.
+    ``Dataset027_ACDC``), not the bare numeric id. Probe raw, preprocessed
+    and results in turn — whichever the user has on disk wins. Returns
+    None when no candidate exists, leaving the caller to surface a 400.
+
+    Multiple matches (a hand-renamed folder collision) resolve
+    deterministically by sorted name.
+    """
+    prefix = f"Dataset{dataset_id_int:03d}_"
+    seen: set[str] = set()
+    for root in (raw_root, preprocessed_root, results_root):
+        if not root.is_dir():
+            continue
+        for entry in root.iterdir():
+            if entry.is_dir() and entry.name.startswith(prefix):
+                seen.add(entry.name)
+    if not seen:
+        return None
+    return sorted(seen)[0]
+
+
 def scan_raw_datasets(raw_root: Path) -> list[DiscoveredDataset]:
     """Walk `raw_root` and return one DiscoveredDataset per Dataset<XXX>_<Name> dir."""
     if not raw_root.is_dir():

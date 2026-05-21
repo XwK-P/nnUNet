@@ -104,6 +104,48 @@ def test_train_enqueue_uses_cfg_paths_in_job_env(
     assert env["nnUNet_results"] == str(populated_paths["results"])
 
 
+def test_train_enqueue_persists_full_dataset_folder_in_output_run_id(
+    populated_client, populated_paths, monkeypatch
+):
+    """output_run_id stored on the Job row must include the full
+    Dataset<NNN>_<Name> folder name, not the bare numeric id. The
+    reaper uses output_run_id to probe checkpoint_final.pth via
+    _disk_evidence_terminal_status; a truncated id would miss and
+    successful train jobs would surface as 'unknown' after a server
+    restart.
+    """
+    monkeypatch.setattr(
+        "nnunetv2.gui.routers.train.render_train",
+        lambda req: _fake_argv(),
+    )
+    r = populated_client.post(
+        "/api/train",
+        json={"dataset_id": 27, "configuration": "3d_fullres", "folds": ["0"]},
+    )
+    assert r.status_code == 201, r.text
+    job_id = r.json()["job_ids"][0]
+    j = populated_client.get(f"/api/jobs/{job_id}").json()
+    # populated_paths builds Dataset027_ACDC under raw/.
+    assert j["output_run_id"] is not None
+    assert j["output_run_id"].startswith("Dataset027_ACDC/"), (
+        f"output_run_id should carry full folder name, got {j['output_run_id']!r}"
+    )
+
+
+def test_train_enqueue_returns_400_when_dataset_id_not_on_disk(populated_client):
+    """No Dataset999_* exists anywhere → 400 instead of writing a row
+    with an unresolvable output_run_id.
+    """
+    r = populated_client.post(
+        "/api/train",
+        json={"dataset_id": 999, "configuration": "3d_fullres", "folds": ["0"]},
+    )
+    assert r.status_code == 400
+    body = r.json()
+    detail = body.get("detail") or body.get("message", "")
+    assert "Dataset999" in detail, f"expected diagnostic to name the missing dataset; got {body!r}"
+
+
 def test_train_validation_missing_required(populated_client):
     r = populated_client.post("/api/train", json={"folds": ["0"]})
     assert r.status_code == 422

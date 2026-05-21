@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from nnunetv2.gui.config import job_env
@@ -13,6 +13,7 @@ from nnunetv2.gui.services.cli_renderer import (
     argv_to_cli_string,
     render_train,
 )
+from nnunetv2.gui.state.discovery import resolve_dataset_folder
 
 
 class TrainBatchRequest(BaseModel):
@@ -74,10 +75,27 @@ def make_router() -> APIRouter:
         cfg = request.app.state.gui_config
         plans = batch.plans or "nnUNetPlans"
         trainer = batch.trainer or "nnUNetTrainer"
+        # Resolve `Dataset027` -> `Dataset027_ACDC` so output_run_id matches
+        # the actual on-disk run path. The reaper uses this to probe
+        # checkpoint_final.pth in the disk-evidence recovery branch
+        # (run_reaper → _disk_evidence_terminal_status); a bare numeric
+        # id would silently miss and surface 'unknown' for jobs that
+        # actually completed across a server restart.
+        dataset_folder = resolve_dataset_folder(
+            cfg.raw, cfg.preprocessed, cfg.results, batch.dataset_id,
+        )
+        if dataset_folder is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Dataset{batch.dataset_id:03d}_* not found under "
+                    "nnUNet_raw / nnUNet_preprocessed / nnUNet_results"
+                ),
+            )
         job_ids: list[int] = []
         for fold_req, rendered in zip(per_fold, jobs_render):
             output_run_id = (
-                f"Dataset{batch.dataset_id:03d}/"
+                f"{dataset_folder}/"
                 f"{plans}__{trainer}__{batch.configuration}/fold_{fold_req.fold}"
             )
             log_path = str(
