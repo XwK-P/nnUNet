@@ -21,6 +21,33 @@ def test_read_all_metrics_empty(tmp_path):
     assert read_all_metrics(tmp_path) == []
 
 
+def test_read_all_metrics_drops_non_finite(tmp_path):
+    """NaN/Inf scalars (common for diverged runs) must not reach the
+    JSON encoder downstream — /api/runs/{id}/metrics_history and
+    /api/compare 500 on non-finite floats. Filter at the boundary.
+    """
+    build_tb_event_dir(
+        tmp_path,
+        scalars={
+            "train_loss": [
+                (0, 1.0),
+                (1, float("nan")),
+                (2, 0.5),
+                (3, float("inf")),
+                (4, float("-inf")),
+                (5, 0.25),
+            ],
+        },
+    )
+    metrics = sorted(
+        (m for m in read_all_metrics(tmp_path) if m["key"] == "train_loss"),
+        key=lambda m: m["step"],
+    )
+    # Only the finite points survive.
+    assert [m["step"] for m in metrics] == [0, 2, 5]
+    assert [m["value"] for m in metrics] == [1.0, 0.5, 0.25]
+
+
 @pytest.mark.asyncio
 async def test_tail_metrics_picks_up_new(tmp_path):
     build_tb_event_dir(tmp_path, scalars={"train_loss": [(0, 1.0)]})

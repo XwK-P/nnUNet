@@ -6,12 +6,20 @@ Image samples (Phase 3+): {kind: 'image_sample', tag, step, url}.
 from __future__ import annotations
 
 import asyncio
+import math
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
 
 def read_all_metrics(event_dir: Path) -> list[dict]:
-    """One-shot read of every scalar in `event_dir`."""
+    """One-shot read of every scalar in `event_dir`.
+
+    Non-finite scalar values (NaN / +/-Inf) are dropped at this
+    boundary. TensorBoard can record those when training diverges and
+    they would otherwise crash JSON serialisation downstream in
+    /api/runs/{id}/metrics_history and /api/compare — returning 500 on
+    exactly the unstable runs the user is trying to inspect.
+    """
     from tbparse import SummaryReader
     if not event_dir.is_dir():
         return []
@@ -24,11 +32,14 @@ def read_all_metrics(event_dir: Path) -> list[dict]:
         return []
     out: list[dict] = []
     for _, row in df.iterrows():
+        value = float(row.get("value"))
+        if not math.isfinite(value):
+            continue
         out.append({
             "kind": "metric",
             "key": str(row.get("tag")),
             "step": int(row.get("step")),
-            "value": float(row.get("value")),
+            "value": value,
             "wall_time": float(row.get("wall_time", 0.0)),
         })
     return out
