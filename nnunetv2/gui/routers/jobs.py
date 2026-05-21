@@ -3,9 +3,38 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+
+def _reap_zombies_in_group(pgid: int) -> None:
+    """Best-effort non-blocking reap of any child zombies in ``pgid``.
+
+    After SIGKILL the kernel transitions the child into a zombie that
+    sits in the proc table — and ``killpg(pgid, 0)`` reports it as
+    alive — until somebody calls wait(). For queue-launched jobs the
+    reaper does that via the held Popen handle. For the direct
+    ``launcher.spawn()`` path (no queue, no reaper, used by some
+    integration tests) nobody is waiting, so the zombie lingers until
+    Python's ``subprocess._active`` cleanup runs on the next Popen
+    call — well after our /stop grace window. Reap them here so
+    ``is_alive(pgid)`` can drop to False as soon as the kernel agrees
+    the group is gone.
+    """
+    if os.name != "posix":
+        return
+    try:
+        while True:
+            pid_reaped, _ = os.waitpid(-pgid, os.WNOHANG)
+            if pid_reaped == 0:
+                break
+    except (ChildProcessError, OSError):
+        # ECHILD: no children of this process belong to that group
+        # (either already reaped by subprocess._active or the job was
+        # launched by a different process). Either way nothing to do.
+        return
 
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -80,17 +109,18 @@ def make_router() -> APIRouter:
             await asyncio.sleep(0.2)
         if is_alive(j.pgid):
             kill_group(j.pgid)
-        # After SIGKILL, the kernel may still report the pgid alive for
-        # a moment while it transitions the child into a zombie waiting
-        # for the reaper to call proc.wait(). Poll up to 10s for either
-        # (a) the OS to drop the group from the proc table, or (b) the
-        # background reaper to record a terminal status — both mean the
-        # subprocess is effectively gone. Without this combined check,
-        # CI under load would flake into a false 504 even though the
-        # job had already died.
+        # After SIGKILL the kernel may keep the child as a zombie in
+        # the proc table until somebody wait()s it. killpg(pgid, 0)
+        # treats zombies as alive, so this loop polls for either
+        # (a) the OS drops the group entirely, or (b) the background
+        # reaper records a terminal status — both mean the subprocess
+        # is effectively gone. We also reap any zombies WE own on each
+        # iteration, so test paths that bypass the queue (and thus the
+        # reaper's proc.wait()) still see is_alive go False quickly.
         deadline = loop.time() + 10
         terminal_states = ("killed", "failed", "completed", "cancelled", "unknown")
         while loop.time() < deadline:
+            _reap_zombies_in_group(j.pgid)
             if not is_alive(j.pgid):
                 break
             refreshed = get_job(cfg, job_id)
