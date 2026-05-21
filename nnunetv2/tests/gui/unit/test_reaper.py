@@ -187,6 +187,53 @@ async def test_attach_on_boot_reattaches_live_pid(gui_config):
 
 
 @pytest.mark.asyncio
+async def test_attach_on_boot_probes_pgid_not_pid(gui_config, monkeypatch):
+    """The reattach liveness check must probe the process *group*, not
+    the bare pid. A DDP / torchrun training whose group leader has
+    already exited (while worker children keep writing) would
+    otherwise be misclassified as terminal at server restart, leaving
+    the workers unmanaged and the row stale.
+
+    Simulate that pattern with a recorded job where pid is dead but
+    pgid still has live children: monkey-patch is_alive to return
+    True only for the pgid value.
+    """
+    init_db(gui_config)
+    # Distinct pid vs pgid so we can prove which one was probed.
+    dead_pid, alive_pgid = 998877, 998811
+    j = insert_job(gui_config, Job(
+        id=None, kind="train", args_json="[]",
+        pid=dead_pid, pgid=alive_pgid, status="running",
+        started_at=None, ended_at=None, exit_code=None,
+        log_path=None, output_run_id=None,
+        created_by="gui", error_message=None, slot="global",
+    ))
+    probed: list[int] = []
+
+    def fake_is_alive(probe: int) -> bool:
+        probed.append(probe)
+        return probe == alive_pgid
+
+    # Patch the symbol attach_on_boot imports.
+    monkeypatch.setattr("nnunetv2.gui.jobs.reaper.is_alive", fake_is_alive)
+    # Stop the reaper from actually waiting on a fake pid.
+    async def noop_reaper(*a, **k):  # noqa: ANN001 - test stub
+        return None
+    monkeypatch.setattr("nnunetv2.gui.jobs.reaper.run_reaper", noop_reaper)
+
+    tasks = await attach_on_boot(gui_config)
+    # Probed the pgid, not the pid.
+    assert probed == [alive_pgid], (
+        f"expected attach_on_boot to probe the pgid {alive_pgid}, got {probed}"
+    )
+    # And scheduled a reaper for the still-live group.
+    assert len(tasks) == 1
+    # Status stays "running" — reaper was scheduled, not declared terminal.
+    fetched = get_job(gui_config, j.id)
+    assert fetched.status == "running"
+
+
+@pytest.mark.asyncio
 async def test_attach_on_boot_marks_failed_for_no_pid(gui_config):
     init_db(gui_config)
     j = insert_job(gui_config, Job(

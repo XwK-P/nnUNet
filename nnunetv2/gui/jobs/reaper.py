@@ -176,7 +176,16 @@ async def attach_on_boot(cfg: GuiConfig) -> list[asyncio.Task]:
                 error_message="no pid recorded",
             )
             continue
-        if is_alive(job.pid):
+        # Probe the process *group* when available, not just the
+        # original pid. DDP / torchrun trainings exit the group leader
+        # well before the worker children — probing pid alone would
+        # falsely declare the job terminal while the workers are still
+        # writing checkpoints, leaving the row stale and the GPU busy.
+        # is_alive() already does the right thing with a pgid on POSIX
+        # (killpg(pgid, 0)); on Windows there is no pgid concept so
+        # signals.spawn stores pid==pgid and this just falls through.
+        probe = job.pgid if job.pgid else job.pid
+        if is_alive(probe):
             task = asyncio.create_task(run_reaper(cfg, job.id, job.pid))
             scheduled.append(task)
         else:
