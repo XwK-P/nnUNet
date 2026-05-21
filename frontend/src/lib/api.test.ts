@@ -1,5 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { api, ApiError, encodePathId, endpoints, getStoredToken, imageEndpoints, withToken } from './api';
+import {
+  api,
+  ApiError,
+  encodePathId,
+  endpoints,
+  getStoredToken,
+  imageEndpoints,
+  withToken,
+  _captureTokenFromUrl_forTests,
+  _resetTokenStateForTests,
+} from './api';
 
 const TOKEN_KEY = 'nnunet_gui_token';
 
@@ -7,10 +17,12 @@ describe('api client', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     window.sessionStorage.removeItem(TOKEN_KEY);
+    _resetTokenStateForTests();
   });
 
   afterEach(() => {
     window.sessionStorage.removeItem(TOKEN_KEY);
+    _resetTokenStateForTests();
   });
 
   it('GET parses JSON on success', async () => {
@@ -111,6 +123,52 @@ describe('api client', () => {
     expect(getStoredToken()).toBeNull();
     window.sessionStorage.setItem(TOKEN_KEY, 'xyz');
     expect(getStoredToken()).toBe('xyz');
+  });
+
+  it('captureTokenFromUrl falls back to memory when sessionStorage write fails', () => {
+    window.history.replaceState({}, '', '/?token=stash-me');
+    expect(window.location.search).toContain('token=stash-me');
+
+    // Privacy-mode / blocked-storage browser. Stub the entire
+    // sessionStorage object — JSDOM's native Storage doesn't honour
+    // own-property method overrides because setItem is dispatched
+    // through the internal Storage class.
+    const realStorage = window.sessionStorage;
+    const throwingStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new DOMException('blocked', 'SecurityError');
+      },
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    } as unknown as Storage;
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true,
+      value: throwingStorage,
+    });
+    try {
+      _captureTokenFromUrl_forTests();
+      expect(getStoredToken()).toBe('stash-me');
+      // URL must remain — sessionStorage is unavailable so a reload
+      // needs the token still present to re-bootstrap.
+      expect(window.location.search).toContain('token=stash-me');
+    } finally {
+      Object.defineProperty(window, 'sessionStorage', {
+        configurable: true,
+        value: realStorage,
+      });
+    }
+  });
+
+  it('captureTokenFromUrl strips URL when storage write succeeds', () => {
+    window.history.replaceState({}, '', '/?token=ok-token');
+    _captureTokenFromUrl_forTests();
+    expect(window.sessionStorage.getItem(TOKEN_KEY)).toBe('ok-token');
+    // URL no longer carries the token; reload won't re-leak it.
+    expect(window.location.search).not.toContain('token=');
+    expect(getStoredToken()).toBe('ok-token');
   });
 
   it('encodePathId preserves slash separators while encoding segments', () => {

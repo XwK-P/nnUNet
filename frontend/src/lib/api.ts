@@ -58,18 +58,42 @@ async function envelope(res: Response): Promise<never> {
 // attach custom headers to those.
 const TOKEN_KEY = 'nnunet_gui_token';
 
+// In-memory fallback for environments where sessionStorage is
+// unavailable (privacy mode, hardened security policies, sandboxed
+// iframes). Without this, a failed storage write would leave us with
+// no token AND a URL the user could click that already had it
+// stripped, so every subsequent /api or /sse call would 401.
+let inMemoryToken: string | null = null;
+
+// Exported so tests can drive the capture path with a stubbed
+// sessionStorage; otherwise the side-effecting import-time call is
+// the only entry point.
+export function _captureTokenFromUrl_forTests(): void {
+  captureTokenFromUrl();
+}
+
+export function _resetTokenStateForTests(): void {
+  inMemoryToken = null;
+}
+
 function captureTokenFromUrl(): void {
   if (typeof window === 'undefined' || !window.location) return;
   const url = new URL(window.location.href);
   const t = url.searchParams.get('token');
   if (!t) return;
+  let stored = false;
   try {
     window.sessionStorage.setItem(TOKEN_KEY, t);
+    stored = true;
   } catch {
-    /* sessionStorage unavailable; we'll still use the in-URL token below */
+    // sessionStorage blocked — hold the token in module memory and
+    // leave it on the URL so a reload still re-bootstraps cleanly.
+    inMemoryToken = t;
   }
-  url.searchParams.delete('token');
-  window.history.replaceState({}, '', url.toString());
+  if (stored) {
+    url.searchParams.delete('token');
+    window.history.replaceState({}, '', url.toString());
+  }
 }
 
 if (typeof window !== 'undefined') captureTokenFromUrl();
@@ -77,10 +101,12 @@ if (typeof window !== 'undefined') captureTokenFromUrl();
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    return window.sessionStorage.getItem(TOKEN_KEY);
+    const fromStorage = window.sessionStorage.getItem(TOKEN_KEY);
+    if (fromStorage) return fromStorage;
   } catch {
-    return null;
+    /* fall through to in-memory fallback */
   }
+  return inMemoryToken;
 }
 
 // Append a token query param to a URL meant for <img>/EventSource. Skips
