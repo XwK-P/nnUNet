@@ -2,7 +2,15 @@
   import { endpoints, ApiError } from '../lib/api';
   import type { PerCaseMetricsResponse, PerCaseMetric } from '../lib/types';
 
-  let { predictionFolder }: { predictionFolder: string } = $props();
+  let {
+    predictionFolder,
+    selectedCase = null,
+    onSelectCase,
+  }: {
+    predictionFolder: string;
+    selectedCase?: string | null;
+    onSelectCase?: (caseId: string) => void;
+  } = $props();
 
   type MetricsState =
     | { kind: 'idle' }
@@ -74,7 +82,12 @@
       </thead>
       <tbody>
         {#each sorted(metricsState.data.cases) as c}
-          <tr class="border-b border-border-soft">
+          <tr
+            class="border-b border-border-soft"
+            class:bg-bg-panel={selectedCase === c.case_id}
+            class:cursor-pointer={onSelectCase}
+            onclick={() => onSelectCase?.(c.case_id)}
+          >
             <td class="py-1 px-2 text-slate-300">{c.case_id}</td>
             <td class="py-1 px-2 text-right text-slate-200">{c.dice?.toFixed(4) ?? '—'}</td>
           </tr>

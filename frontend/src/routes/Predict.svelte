@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { createDatasetsStore } from '../lib/stores/datasets';
   import { createWorkspaceStore } from '../lib/stores/workspace';
+  import { imageEndpoints } from '../lib/api';
   import PredictForm from '../lib/forms/PredictForm.svelte';
   import PredictPaneViewer from '../components/PredictPaneViewer.svelte';
   import PerCaseMetricsTable from '../components/PerCaseMetricsTable.svelte';
@@ -12,9 +13,9 @@
   let dsState = $state(ds.get());
 
   let predictionFolder = $state<string>('');
-  let inputUrl = $state<string>('');
-  let labelUrl = $state<string | null>(null);
-  let predictionUrl = $state<string | null>(null);
+  let selectedCase = $state<string | null>(null);
+  let axis = $state(0);
+  let slice = $state(0);
 
   onMount(() => {
     const u1 = ws.subscribe((v) => (workspaceId = v));
@@ -31,6 +32,26 @@
     const m = dsState.data.find((d) => d.id === workspaceId);
     return m?.dataset_id_int ?? null;
   });
+
+  // URLs for the 3-pane viewer. The Predict page works against an
+  // arbitrary predictionFolder (not a managed Run), so prediction URLs
+  // go through the folder-scoped endpoint; the input/label panes reuse
+  // the dataset-scoped endpoints because the case_id matches.
+  const inputUrl = $derived(
+    workspaceId && selectedCase
+      ? imageEndpoints.getCasePreviewUrl(workspaceId, selectedCase, { axis, slice, channel: 0 })
+      : null,
+  );
+  const labelUrl = $derived(
+    workspaceId && selectedCase
+      ? imageEndpoints.getCaseLabelsUrl(workspaceId, selectedCase, { axis, slice })
+      : null,
+  );
+  const predictionUrl = $derived(
+    predictionFolder && selectedCase
+      ? imageEndpoints.getPredictPreviewByFolderUrl(predictionFolder, selectedCase, { axis, slice })
+      : null,
+  );
 </script>
 
 <h2 class="text-lg font-semibold text-slate-100">Predict</h2>
@@ -58,11 +79,19 @@
         />
       </div>
 
-      {#if inputUrl}
-        <PredictPaneViewer {inputUrl} {labelUrl} {predictionUrl} />
-      {/if}
       {#if predictionFolder}
-        <PerCaseMetricsTable {predictionFolder} />
+        <PredictPaneViewer
+          {inputUrl}
+          {labelUrl}
+          {predictionUrl}
+          bind:axis
+          bind:slice
+        />
+        <PerCaseMetricsTable
+          {predictionFolder}
+          {selectedCase}
+          onSelectCase={(c) => (selectedCase = c)}
+        />
       {/if}
     </div>
   </div>

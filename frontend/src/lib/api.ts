@@ -204,6 +204,21 @@ export const imageEndpoints = {
     const q = new URLSearchParams({ axis: String(opts.axis), slice: String(opts.slice) });
     return `/api/runs/${runId}/predictions/${encodeURIComponent(caseId)}?${q}`;
   },
+
+  // Folder-scoped preview for the Predict page, where the user pastes
+  // an arbitrary predictions/ folder rather than navigating from a Run.
+  getPredictPreviewByFolderUrl: (
+    folder: string, caseId: string,
+    opts: { axis: number; slice: number },
+  ): string => {
+    const q = new URLSearchParams({
+      prediction_folder: folder,
+      case_id: caseId,
+      axis: String(opts.axis),
+      slice: String(opts.slice),
+    });
+    return `/api/predict/preview?${q}`;
+  },
 };
 
 export const launchEndpoints = {

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
@@ -11,6 +12,10 @@ from nnunetv2.gui.services.cli_renderer import (
     PredictRequest,
     argv_to_cli_string,
     render_predict,
+)
+from nnunetv2.gui.services.predictions import (
+    find_prediction_for_case,
+    render_prediction_preview,
 )
 
 
@@ -40,6 +45,30 @@ def make_router() -> APIRouter:
             log_path=log_path,
         )
         return {"job_id": job.id, "argv": argv, "cli": cli}
+
+    @router.get("/preview")
+    def preview_by_folder(
+        prediction_folder: str, case_id: str,
+        axis: int = 0, slice: int = 0,
+        window_lo: Optional[float] = None, window_hi: Optional[float] = None,
+    ) -> Response:
+        """Folder-scoped variant of /api/runs/.../predictions/{case_id}.
+
+        The Predict page lets the user paste an arbitrary predictions/
+        folder (typically alongside a summary.json from a CLI run).
+        That folder isn't tied to a GUI-managed Run, so the run-scoped
+        endpoint can't reach it; this mirror takes the folder directly
+        and reuses the same suffix-preference + format-dispatch rules.
+        """
+        match = find_prediction_for_case(Path(prediction_folder), case_id)
+        if match is None:
+            raise HTTPException(status_code=404, detail=f"No prediction for {case_id!r}")
+        window = (
+            (window_lo, window_hi)
+            if (window_lo is not None and window_hi is not None)
+            else None
+        )
+        return render_prediction_preview(match, axis=axis, slice=slice, window=window)
 
     @router.get("/per_case_metrics")
     def per_case_metrics(prediction_folder: str) -> dict:
