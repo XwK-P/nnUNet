@@ -90,6 +90,36 @@ def test_gather_summaries_reads_validation_summary(populated_paths, monkeypatch)
     assert s.status == "completed"
 
 
+def test_gather_summaries_drops_non_finite_dice(populated_paths, monkeypatch):
+    """nnUNet writes NaN/Inf into summary.json for absent or degenerate
+    classes. The compare endpoint must coerce those to None instead of
+    forwarding raw non-finite floats — Starlette's JSON encoder rejects
+    them and would 500 the whole compare response.
+    """
+    import json
+    cfg = _cfg(populated_paths, monkeypatch)
+    run_id = "Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0"
+    fold_dir = Path(cfg.results) / run_id
+    val = fold_dir / "validation"
+    val.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "foreground_mean": {"Dice": float("nan")},
+        "mean": {
+            "1": {"Dice": 0.7},
+            "2": {"Dice": float("inf")},
+            "3": {"Dice": float("nan")},
+        },
+    }
+    (val / "summary.json").write_text(json.dumps(summary))
+    out = gather_run_summaries(cfg, [run_id])
+    assert len(out) == 1
+    s = out[0]
+    # NaN coerces to None — the response stays JSON-serialisable.
+    assert s.foreground_mean_dice is None
+    # Per-class drops non-finite labels, keeps finite ones.
+    assert s.per_class_dice == {"1": 0.7}
+
+
 def test_gather_summaries_missing_summary_returns_none_fields(populated_paths, monkeypatch):
     cfg = _cfg(populated_paths, monkeypatch)
     run_id = "Dataset027_ACDC/nnUNetPlans__nnUNetTrainer__3d_fullres/fold_0"

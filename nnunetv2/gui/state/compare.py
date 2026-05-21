@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Optional
 
@@ -100,6 +101,24 @@ def gather_run_summaries(cfg: GuiConfig, run_ids: list[str]) -> list[RunSummary]
     return out
 
 
+def _finite_float(x: object) -> Optional[float]:
+    """Return float(x) if it's a finite number, else None.
+
+    nnUNet writes NaN to summary.json when a class is absent in a run
+    (and Inf in degenerate cases); FastAPI's JSON encoder rejects
+    non-finite floats and would 500 the entire compare response. Coerce
+    those to None so the field renders as missing rather than killing
+    the request.
+    """
+    if x is None:
+        return None
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
 def _read_summary(fold_dir: Path) -> tuple[Optional[float], Optional[dict[str, float]]]:
     fp = fold_dir / "validation" / "summary.json"
     if not fp.is_file():
@@ -108,15 +127,14 @@ def _read_summary(fold_dir: Path) -> tuple[Optional[float], Optional[dict[str, f
         data = json.loads(fp.read_text())
     except (OSError, json.JSONDecodeError):
         return None, None
-    fg = None
     fg_block = data.get("foreground_mean") or {}
-    if isinstance(fg_block, dict):
-        fg = fg_block.get("Dice")
+    fg = _finite_float(fg_block.get("Dice")) if isinstance(fg_block, dict) else None
     per_class: dict[str, float] = {}
     mean_block = data.get("mean") or {}
     if isinstance(mean_block, dict):
         for label, metrics in mean_block.items():
             if isinstance(metrics, dict) and "Dice" in metrics:
-                per_class[str(label)] = float(metrics["Dice"])
-    return (float(fg) if fg is not None else None,
-            per_class or None)
+                v = _finite_float(metrics["Dice"])
+                if v is not None:
+                    per_class[str(label)] = v
+    return fg, (per_class or None)
