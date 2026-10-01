@@ -58,3 +58,248 @@ export interface DashboardData {
     };
   };
 }
+
+export interface Case {
+  id: string;
+  dataset_id: string;
+  channels: Record<string, string>;
+  label_path: string | null;
+}
+
+export interface Prediction {
+  case_id: string;
+  path: string;
+}
+
+export interface MetricEvent {
+  kind: 'metric';
+  key: string;
+  step: number;
+  value: number;
+  wall_time: number;
+}
+
+export interface LogEvent {
+  kind: 'log';
+  line: string;
+  ts: number;
+}
+
+export interface ImageSampleEvent {
+  kind: 'image_sample';
+  tag: string;
+  step: number;
+  url?: string;
+}
+
+export interface RunStatusEvent {
+  kind: 'status';
+  phase: string;
+  message?: string;
+}
+
+export type RunEvent = MetricEvent | LogEvent | ImageSampleEvent | RunStatusEvent;
+
+export interface Job {
+  id: number;
+  kind: string;
+  args_json: string;
+  pid: number | null;
+  pgid: number | null;
+  status: string;
+  started_at: string | null;
+  ended_at: string | null;
+  exit_code: number | null;
+  log_path: string | null;
+  output_run_id: string | null;
+  created_by: string | null;
+  error_message: string | null;
+  slot?: string;
+}
+
+export interface PreprocessRequest {
+  dataset_id: number;
+  verify_dataset_integrity?: boolean;
+  planner?: string;
+  configurations?: string[];
+  no_pp?: boolean;
+  npfp?: number;
+  np?: number;
+}
+
+export interface TrainBatchRequest {
+  dataset_id: number;
+  configuration: string;
+  folds: string[];
+  trainer?: string;
+  plans?: string;
+  pretrained_weights?: string;
+  num_gpus?: number;
+  npz?: boolean;
+  continue_training?: boolean;
+  val_only?: boolean;
+  val_best?: boolean;
+  disable_checkpointing?: boolean;
+  device?: string;
+}
+
+export interface PredictRequest {
+  dataset_id: number;
+  configuration: string;
+  input_folder: string;
+  output_folder: string;
+  folds: string[];
+  trainer?: string;
+  plans?: string;
+  checkpoint?: string;
+  step_size?: number;
+  disable_tta?: boolean;
+  save_probabilities?: boolean;
+  continue_prediction?: boolean;
+  device?: string;
+}
+
+export interface GpuInfo {
+  index: number;
+  name: string;
+  memory_total_mb: number;
+  memory_used_mb: number;
+  util_pct: number;
+}
+
+export interface CliPreviewLine {
+  argv: string[];
+  cli: string;
+}
+
+export interface PreprocessLaunchResponse extends CliPreviewLine {
+  job_id?: number;
+}
+
+export interface TrainLaunchResponse {
+  jobs: CliPreviewLine[];
+  job_ids?: number[];
+}
+
+export interface PredictLaunchResponse extends CliPreviewLine {
+  job_id?: number;
+}
+
+export interface MetricPoint {
+  step: number;
+  value: number;
+  wall_time: number | null;
+}
+
+export interface RunMetricSeries {
+  run_id: string;
+  series: Record<string, MetricPoint[]>;
+}
+
+export interface RunSummary {
+  run_id: string;
+  dataset_id: string;
+  plans_name: string;
+  trainer_name: string;
+  configuration: string;
+  fold: string;
+  status: string;
+  foreground_mean_dice: number | null;
+  per_class_dice: Record<string, number> | null;
+}
+
+export interface CompareResponse {
+  metrics: RunMetricSeries[];
+  summaries: RunSummary[];
+}
+
+export interface Checkpoint {
+  name: string;
+  path: string;
+  size_bytes: number;
+}
+
+export interface ModelFold {
+  fold: string;
+  output_folder: string;
+  status: string;
+  checkpoints: Checkpoint[];
+}
+
+export interface Model {
+  id: string;
+  dataset_id: string;
+  plans_name: string;
+  trainer_name: string;
+  configuration: string;
+  folds: ModelFold[];
+}
+
+export interface PerCaseMetric {
+  case_id: string;
+  dice: number | null;
+}
+
+export interface PerCaseMetricsResponse {
+  foreground_mean_dice: number | null;
+  cases: PerCaseMetric[];
+}
+
+export interface FindBestConfigRequest {
+  dataset_id: number;
+  plans?: string[];
+  configurations?: string[];
+  trainers?: string[];
+  folds?: string[];
+  disable_ensembling?: boolean;
+  no_overwrite?: boolean;
+  num_processes?: number;
+}
+
+export interface EnsembleRequest {
+  input_folders: string[];
+  output_folder: string;
+  save_npz?: boolean;
+  num_processes?: number;
+}
+
+export interface PostprocRequest {
+  input_folder: string;
+  output_folder: string;
+  pp_pkl_file: string;
+  plans_json?: string;
+  dataset_json?: string;
+  num_processes?: number;
+}
+
+export interface ExportModelRequest {
+  dataset_id: number;
+  output_zip: string;
+  configurations?: string[];
+  folds?: string[];
+  trainer?: string;
+  plans?: string;
+  checkpoints?: string[];
+  export_cv_preds?: boolean;
+}
+
+export interface ImportModelRequest {
+  zip_path: string;
+}
+
+export interface EnvVar {
+  name: string;
+  value: string | null;
+  editable: boolean;
+}
+
+export interface EnvVarsResponse {
+  vars: EnvVar[];
+}
+
+export type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
+
+export interface RunUpdateRequest {
+  tags?: string[];
+  notes?: string;
+}

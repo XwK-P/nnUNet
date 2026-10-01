@@ -1,5 +1,27 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
   import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
+  import { createJobsStore } from '../lib/stores/jobs';
+
+  const ACTIVE = new Set(['queued', 'starting', 'running', 'pending']);
+
+  const jobs = createJobsStore();
+  let activeCount = $state(0);
+
+  onMount(() => {
+    const unsub = jobs.subscribe((s) => {
+      if (s.kind === 'loaded') {
+        activeCount = s.data.filter((j) => ACTIVE.has(j.status)).length;
+      }
+    });
+    jobs.startPolling(5000);
+    return () => {
+      unsub();
+    };
+  });
+  onDestroy(() => {
+    jobs.stopPolling();
+  });
 </script>
 
 <header
@@ -9,9 +31,17 @@
 
   <WorkspaceSwitcher />
 
-  <span class="bg-emerald-900 text-emerald-200 px-2 py-0.5 rounded-full text-[10px]">
-    ● 0 jobs running
-  </span>
+  <a
+    href="#/jobs"
+    class="px-2 py-0.5 rounded-full text-[10px] hover:underline"
+    class:bg-emerald-900={activeCount === 0}
+    class:text-emerald-200={activeCount === 0}
+    class:bg-amber-700={activeCount > 0}
+    class:text-amber-100={activeCount > 0}
+    aria-label={`${activeCount} active jobs (open jobs page)`}
+  >
+    ● {activeCount} jobs running
+  </a>
 
   <span class="text-amber-400 text-[10px]">GPU: pending</span>
 

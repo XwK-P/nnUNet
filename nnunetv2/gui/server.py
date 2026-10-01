@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import logging
 import traceback
 from pathlib import Path
@@ -10,10 +11,21 @@ from fastapi.staticfiles import StaticFiles
 
 from nnunetv2.gui.config import GuiConfig
 from nnunetv2.gui.db import init_db
+from nnunetv2.gui.jobs.queue import JobQueue
+from nnunetv2.gui.jobs.reaper import attach_on_boot as reaper_attach
+from nnunetv2.gui.routers import compare as compare_router
 from nnunetv2.gui.routers import dashboard as dashboard_router
 from nnunetv2.gui.routers import datasets as datasets_router
+from nnunetv2.gui.routers import jobs as jobs_router
+from nnunetv2.gui.routers import models as models_router
+from nnunetv2.gui.routers import monitor as monitor_router
+from nnunetv2.gui.routers import postproc as postproc_router
+from nnunetv2.gui.routers import predict as predict_router
+from nnunetv2.gui.routers import preprocess as preprocess_router
 from nnunetv2.gui.routers import runs as runs_router
 from nnunetv2.gui.routers import system as system_router
+from nnunetv2.gui.routers import train as train_router
+from nnunetv2.gui.services.sse import RunStreamHub
 from nnunetv2.gui.state.discovery import reconcile
 
 
@@ -31,13 +43,86 @@ def create_app(cfg: GuiConfig) -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     app.state.gui_config = cfg
+    app.state.run_stream_hub = RunStreamHub()
+    app.state.job_queue = JobQueue(cfg)
+
+    @app.on_event("startup")
+    async def _attach_jobs_on_boot() -> None:
+        tasks = await reaper_attach(cfg)
+        app.state._boot_reaper_tasks = tasks
+        # Re-kick any queued jobs left over from a previous server boot.
+        # Without this, queued rows would sit forever until the next enqueue
+        # happened to land in the same slot.
+        await app.state.job_queue.kickstart_pending()
+
+    @app.on_event("shutdown")
+    async def _shutdown_jobs() -> None:
+        # Critical: do NOT terminate the subprocesses themselves.
+        # Just stop tailing/reaping — they continue under their detached pgid.
+        for t in getattr(app.state, "_boot_reaper_tasks", []):
+            t.cancel()
 
     app.include_router(system_router.make_router())
     app.include_router(datasets_router.make_router())
     app.include_router(runs_router.make_router())
     app.include_router(dashboard_router.make_router())
+    app.include_router(monitor_router.make_router())
+    app.include_router(jobs_router.make_router())
+    app.include_router(preprocess_router.make_router())
+    app.include_router(train_router.make_router())
+    app.include_router(predict_router.make_router())
+    app.include_router(compare_router.make_router())
+    app.include_router(models_router.make_router())
+    app.include_router(postproc_router.make_router())
 
     is_loopback = cfg.host in ("127.0.0.1", "localhost", "::1")
+
+    # When --token is set (mandatory for non-loopback in
+    # GuiConfig.from_env_and_args), require it on every /api/* request.
+    # The SPA static files and /api/system/healthz stay unauthenticated
+    # so the page can bootstrap and external monitors can liveness-check.
+    # Loopback deployments that didn't set a token keep the open
+    # behaviour they had before — the operator IS the user there.
+    if cfg.token is not None:
+        expected_header = f"Bearer {cfg.token}"
+
+        @app.middleware("http")
+        async def _enforce_bearer(request: Request, call_next):
+            path = request.url.path
+            # Gate everything reachable as API surface: REST under /api/*
+            # AND SSE under /sse/* (monitor.py mounts there). Healthz
+            # stays open for liveness probes; the SPA static files at
+            # / are unauthenticated so the user can load the page and
+            # supply their token.
+            protected = path.startswith("/api/") or path.startswith("/sse/")
+            if not protected or path == "/api/system/healthz":
+                return await call_next(request)
+            # CORS preflights carry no Authorization header by design.
+            if request.method == "OPTIONS":
+                return await call_next(request)
+            # Accept either an `Authorization: Bearer <token>` header
+            # (preferred, used by the SPA's fetch wrapper) or a
+            # `?token=<token>` query param. The query-param fallback is
+            # required for resources the browser loads without going
+            # through our fetch wrapper — <img src=...> for slice
+            # previews, EventSource for SSE — where custom headers
+            # cannot be attached. Tokens in URLs can leak via access
+            # logs; treat HTTPS as a prerequisite for non-loopback.
+            auth_header = request.headers.get("Authorization", "")
+            token_query = request.query_params.get("token", "")
+            header_ok = hmac.compare_digest(auth_header, expected_header)
+            query_ok = bool(token_query) and hmac.compare_digest(token_query, cfg.token)
+            if not (header_ok or query_ok):
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "kind": "unauthorized",
+                        "message": "Missing or invalid bearer token.",
+                        "retryable": False,
+                        "details": None,
+                    },
+                )
+            return await call_next(request)
 
     web_dir = Path(__file__).resolve().parent / "web"
     if (web_dir / "index.html").exists():

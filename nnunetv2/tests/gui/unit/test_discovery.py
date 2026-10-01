@@ -120,3 +120,34 @@ def test_scan_results_skips_garbage_dirs(populated_paths):
 def test_scan_results_empty(gui_paths):
     from nnunetv2.gui.state.discovery import scan_results_runs
     assert scan_results_runs(gui_paths["results"]) == []
+
+
+def test_resolve_dataset_folder_finds_name_from_raw(populated_paths):
+    from nnunetv2.gui.state.discovery import resolve_dataset_folder
+    name = resolve_dataset_folder(
+        populated_paths["raw"], populated_paths["preprocessed"],
+        populated_paths["results"], 27,
+    )
+    assert name == "Dataset027_ACDC"
+
+
+def test_resolve_dataset_folder_falls_back_to_results(gui_paths):
+    """If raw/ has no Dataset099 but results/ does (e.g. user has only
+    the trained model checked out), resolution still works.
+    """
+    from nnunetv2.tests.gui.fixtures.builders import build_run
+    from nnunetv2.gui.state.discovery import resolve_dataset_folder
+    build_run(gui_paths["results"], dataset_folder="Dataset099_OnlyRes",
+              configuration="3d_fullres", fold="0")
+    name = resolve_dataset_folder(
+        gui_paths["raw"], gui_paths["preprocessed"], gui_paths["results"], 99,
+    )
+    assert name == "Dataset099_OnlyRes"
+
+
+def test_resolve_dataset_folder_returns_none_when_missing(gui_paths):
+    from nnunetv2.gui.state.discovery import resolve_dataset_folder
+    name = resolve_dataset_folder(
+        gui_paths["raw"], gui_paths["preprocessed"], gui_paths["results"], 999,
+    )
+    assert name is None

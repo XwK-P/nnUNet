@@ -69,3 +69,35 @@ def populated_paths(gui_paths):
     build_run(gui_paths["results"], dataset_folder=folder, configuration="3d_fullres", fold="0")
     build_run(gui_paths["results"], dataset_folder=folder, configuration="2d", fold="0")
     return gui_paths
+
+
+@pytest.fixture
+def populated_nifti_paths(gui_paths):
+    """Like populated_paths but writes real NIfTI bytes for one case."""
+    from nnunetv2.tests.gui.fixtures.builders import (
+        build_dataset_raw, build_dataset_preprocessed, build_run, build_case_nifti,
+    )
+    folder = build_dataset_raw(gui_paths["raw"], dataset_id=27, name="ACDC",
+                                case_ids=["case_001"])
+    build_dataset_preprocessed(gui_paths["preprocessed"], dataset_folder=folder)
+    build_run(gui_paths["results"], dataset_folder=folder, configuration="3d_fullres", fold="0")
+    # Replace the empty touched files with real NIfTI
+    images_tr = gui_paths["raw"] / folder / "imagesTr"
+    labels_tr = gui_paths["raw"] / folder / "labelsTr"
+    (images_tr / "case_001_0000.nii.gz").unlink()
+    (labels_tr / "case_001.nii.gz").unlink()
+    build_case_nifti(images_tr, "case_001_0000.nii.gz", shape=(8, 16, 16))
+    build_case_nifti(labels_tr, "case_001.nii.gz", shape=(8, 16, 16))
+    return gui_paths
+
+
+@pytest.fixture
+def populated_client(populated_paths, monkeypatch):
+    """TestClient bound to a populated paths fixture (3 cases, 2 runs, no NIfTI)."""
+    monkeypatch.setenv("nnUNet_raw", str(populated_paths["raw"]))
+    monkeypatch.setenv("nnUNet_preprocessed", str(populated_paths["preprocessed"]))
+    monkeypatch.setenv("nnUNet_results", str(populated_paths["results"]))
+    from fastapi.testclient import TestClient
+    from nnunetv2.gui.config import GuiConfig
+    from nnunetv2.gui.server import create_app
+    return TestClient(create_app(GuiConfig.from_env_and_args(host="127.0.0.1", port=0, token=None)))
